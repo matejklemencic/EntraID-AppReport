@@ -1,6 +1,6 @@
 # EntraID-AppReport
 
-> **PowerShell script that generates an interactive HTML security report for Microsoft Entra ID Enterprise Applications — with risk scoring, permission analysis, credential tracking and owner visibility.**
+> **PowerShell script that generates an interactive HTML security report for Microsoft Entra ID Enterprise Applications.**
 
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue?logo=powershell)
 ![Microsoft Graph](https://img.shields.io/badge/Microsoft%20Graph-SDK%20v2-0078d4?logo=microsoft)
