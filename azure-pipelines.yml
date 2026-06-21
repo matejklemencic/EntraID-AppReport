@@ -1,0 +1,70 @@
+# Entra ID App Report — Azure DevOps Pipeline
+# Uses an Azure service connection (azureSubscription) for auth — no secrets stored in ADO.
+#
+# PREREQUISITES
+# -------------
+# 1. Create an Azure service connection in ADO pointing to your tenant.
+#    The service principal behind it needs these Entra ID Application permissions (admin consent required):
+#      - Application.Read.All
+#      - Directory.Read.All
+#      - DelegatedPermissionGrant.Read.All
+#      - RoleManagement.Read.Directory
+#
+# 2. Update 'azureSubscription' below to match your ADO service connection name.
+
+trigger:
+  - main
+
+schedules:
+  - cron: "0 6 * * 1"          # Every Monday at 06:00 UTC
+    displayName: Weekly Monday report
+    branches:
+      include:
+        - main
+    always: true                # Run even if no code changes
+
+pool:
+  vmImage: ubuntu-24.04
+
+steps:
+  - task: AzurePowerShell@5
+    displayName: "Generate Entra ID App Report"
+    inputs:
+      azureSubscription: "YOUR-SERVICE-CONNECTION-NAME"   # <-- update this
+      pwsh: true
+      azurePowerShellVersion: LatestVersion
+      ScriptType: InlineScript
+      Inline: |
+        # Install required Microsoft Graph modules
+        Write-Host "##[section]Installing Microsoft Graph modules..."
+        Install-Module -Name Microsoft.Graph.Authentication,
+          Microsoft.Graph.Applications,
+          Microsoft.Graph.Identity.DirectoryManagement,
+          Microsoft.Graph.Users `
+          -Force -AllowClobber -Scope CurrentUser
+
+        # Get tenant ID and Graph access token from the Az service connection context
+        $tenantId = (Get-AzContext).Tenant.Id
+        Write-Host "##[section]Tenant: $tenantId"
+
+        $rawToken = (Get-AzAccessToken -ResourceTypeName MSGraph).Token
+        $graphToken = if ($rawToken -is [System.Security.SecureString]) {
+            $rawToken
+        } else {
+            ConvertTo-SecureString $rawToken -AsPlainText -Force
+        }
+
+        # Run the report
+        $outputPath = "$(Build.ArtifactStagingDirectory)/EntraIDReport_$(Get-Date -Format 'yyyy-MM-dd').html"
+
+        & "$(Build.SourcesDirectory)/Get-EntraIDAppReport.ps1" `
+          -AccessToken $graphToken `
+          -NonInteractive `
+          -OutputPath $outputPath
+
+        Write-Host "##[section]Report saved to: $outputPath"
+
+  - publish: $(Build.ArtifactStagingDirectory)
+    displayName: Publish Report Artifact
+    artifact: EntraIDAppReport
+    condition: always()
