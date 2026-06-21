@@ -856,7 +856,7 @@ foreach ($sp in $servicePrincipals) {
     
     # Calculate if it's an internal app
     $isInternalApp = $sp.AppOwnerOrganizationId -eq (Get-MgContext).TenantId
-    $isMicrosoftApp = $sp.AppOwnerOrganizationId -in @('f8cdef31-a31e-4b4a-93e4-5f571e91255a', '72f988bf-86f1-41af-91ab-2d7cd011db47')
+    $isMicrosoftApp = $sp.AppOwnerOrganizationId -in @('f8cdef31-a31e-4b4a-93e4-5f571e91255a', '72f988bf-86f1-41af-91ab-2d7cd011db47', 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2')
 
     # Calculate risk score with enhanced ownership parameters
     $riskAssessment = Get-RiskScore `
@@ -985,8 +985,8 @@ if ($outputDir -and -not (Test-Path $outputDir)) {
 
 # Calculate additional statistics for internal vs external apps and ownership
 $internalApps   = @($report | Where-Object { $_.AppOwnerOrganizationId -eq $tenantId }).Count
-$microsoftApps  = @($report | Where-Object { $_.AppOwnerOrganizationId -in @('f8cdef31-a31e-4b4a-93e4-5f571e91255a','72f988bf-86f1-41af-91ab-2d7cd011db47') }).Count
-$externalApps   = @($report | Where-Object { $_.AppOwnerOrganizationId -ne $tenantId -and $_.AppOwnerOrganizationId -notin @('f8cdef31-a31e-4b4a-93e4-5f571e91255a','72f988bf-86f1-41af-91ab-2d7cd011db47') }).Count
+$microsoftApps  = @($report | Where-Object { $_.AppOwnerOrganizationId -in @('f8cdef31-a31e-4b4a-93e4-5f571e91255a','72f988bf-86f1-41af-91ab-2d7cd011db47','cdc5aeea-15c5-4db6-b079-fcadd2505dc2') }).Count
+$externalApps   = @($report | Where-Object { $_.AppOwnerOrganizationId -ne $tenantId -and $_.AppOwnerOrganizationId -notin @('f8cdef31-a31e-4b4a-93e4-5f571e91255a','72f988bf-86f1-41af-91ab-2d7cd011db47','cdc5aeea-15c5-4db6-b079-fcadd2505dc2') }).Count
 $appsWithoutOwners = @($report | Where-Object { $_.HasOwners -eq $false }).Count
 $appsWithOpenAccess = @($report | Where-Object { $_.AssignmentRequired -eq $false }).Count
 $appsWithOwnershipGaps = @($report | Where-Object { $_.OwnershipGap -eq $true }).Count
@@ -1567,7 +1567,7 @@ foreach ($app in $sortedReport) {
     
     # Determine app ownership
     $isInternal = $app.AppOwnerOrganizationId -eq $tenantId
-    $isMicrosoft = $app.AppOwnerOrganizationId -in @('f8cdef31-a31e-4b4a-93e4-5f571e91255a', '72f988bf-86f1-41af-91ab-2d7cd011db47')
+    $isMicrosoft = $app.AppOwnerOrganizationId -in @('f8cdef31-a31e-4b4a-93e4-5f571e91255a', '72f988bf-86f1-41af-91ab-2d7cd011db47', 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2')
     $ownershipType = if ($isInternal) { "internal" } elseif ($isMicrosoft) { "microsoft" } else { "third-party" }
     $ownershipText = switch ($ownershipType) {
         "internal"    { "<span class='badge green clickable-badge' data-fg='ownership' data-fv='internal' title='App registered in this tenant and owned by your organization'>Internal</span>" }
