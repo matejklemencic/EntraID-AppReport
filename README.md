@@ -26,7 +26,7 @@ The report includes:
 
 ## 📸 Screenshots
 
-> *(Add screenshots of the HTML report here after first run)*
+> *TBA*
 
 ---
 
