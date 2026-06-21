@@ -1,6 +1,6 @@
 # EntraID-AppReport
 
-> **PowerShell script that generates an interactive HTML security report for Microsoft Entra ID Enterprise Applications.**
+> **PowerShell script that generates an interactive HTML security report for Microsoft Entra ID Enterprise Applications. Includes risk scoring, permission analysis, credential tracking and owner visibility.**
 
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue?logo=powershell)
 ![Microsoft Graph](https://img.shields.io/badge/Microsoft%20Graph-SDK%20v2-0078d4?logo=microsoft)
@@ -8,36 +8,37 @@
 
 ---
 
-## 📋 Overview
+## Overview
 
 `Get-EntraIDAppReport.ps1` connects to Microsoft Graph, retrieves all Enterprise Applications (Service Principals) in your Entra ID tenant, analyzes their permissions, credentials and ownership, calculates a risk score for each app and outputs a fully self-contained, interactive HTML report.
 
 The report includes:
 
-- 🔴 **Risk scoring** — Critical / High / Medium / Low with per-app risk factor breakdown
-- 🔑 **Credential tracking** — active secrets and certificates, expiry warnings (30-day window), long-lived credential detection
-- 👥 **Ownership analysis** — owner counts across both Service Principal and App Registration, ownership gap detection
-- 🔐 **Permission analysis** — Application, Delegated and Directory Role permissions with links to [Graph Permissions Explorer](https://graphpermissions.merill.net)
-- 🏷️ **App classification** — Internal, Microsoft, and Third-Party with deep links to the Entra portal
-- 🔍 **Interactive filtering** — filter by risk level, ownership, credentials, permissions, enabled status and more
-- 🌙 **Dark mode** support
+* 🔴 **Risk scoring** — Critical / High / Medium / Low with per-app risk factor breakdown
+* 🔑 **Credential tracking** — active secrets and certificates, expiry warnings (30-day window), long-lived credential detection
+* 👥 **Ownership analysis** — owner counts across both Service Principal and App Registration, ownership gap detection
+* 🔐 **Permission analysis** — Application, Delegated and Directory Role permissions with links to [Graph Permissions Explorer](https://graphpermissions.merill.net)
+* 🏷️ **App classification** — Internal, Microsoft and Third-Party with deep links to the Entra portal
+* 🔍 **Interactive filtering** — filter by risk level, ownership, credentials, permissions, enabled status and more
+* 🌙 **Dark mode** support
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 
-> *TBA*
+> *(Add screenshots of the HTML report here after first run)*
 
 ---
 
-## ⚙️ Requirements
+## Requirements
 
 ### PowerShell
-- PowerShell 5.1 or PowerShell 7+
+
+PowerShell 5.1 or PowerShell 7+
 
 ### Microsoft Graph Modules
 
-Install the required modules (only the ones needed — faster than the full umbrella):
+Install the required modules (only the ones needed, which is faster than the full umbrella):
 
 ```powershell
 Install-Module -Name Microsoft.Graph.Authentication,
@@ -68,12 +69,12 @@ For **interactive runs**, Delegated permissions are sufficient. For **pipeline/u
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ### Interactive (local run)
 
 ```powershell
-# Basic — connects to your default tenant
+# Basic run, connects to your default tenant
 .\Get-EntraIDAppReport.ps1
 
 # Specific tenant
@@ -99,40 +100,40 @@ The report is saved as `EntraIDReport_{TenantName}_{Date}.html` by default and o
 
 ---
 
-## 📊 Parameters
+## Parameters
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `-OutputPath` | String | Auto-generated | Path to save the HTML report. Defaults to `EntraIDReport_{TenantName}_{Date}.html` |
-| `-TenantId` | String | — | Entra ID tenant ID. Required for Service Principal auth. Optional for interactive. |
-| `-AccessToken` | SecureString | — | Pre-acquired Graph access token. Use with `AzurePowerShell@5` pipelines. |
-| `-ClientId` | String | — | App (client) ID for Service Principal authentication. |
-| `-ClientSecret` | String | — | Client secret for Service Principal authentication. |
-| `-CertificateThumbprint` | String | — | Certificate thumbprint for Service Principal authentication (recommended over secret). |
-| `-UseManagedIdentity` | Switch | — | Use Azure Managed Identity (for Azure-hosted agents or VMs). |
-| `-NonInteractive` | Switch | — | Suppress all prompts and browser launch. Required for pipelines. |
-| `-OnlyWithPermissions` | Switch | — | Include only apps with at least one permission. |
-| `-MinimumPermissions` | Int | `0` | Include only apps with at least this many permissions. |
-| `-OnlyWithAppRegistrations` | Switch | — | Include only apps with a linked App Registration in this tenant. |
-| `-OnlyServicePrincipals` | Switch | — | Include only service principals with no App Registration. |
-| `-RiskConfigPath` | String | — | Path to a JSON file with custom risk scoring rules. |
-| `-Verbose` | Switch | — | Enable verbose logging. |
+| `OutputPath` | String | Auto-generated | Path to save the HTML report. Defaults to `EntraIDReport_{TenantName}_{Date}.html` |
+| `TenantId` | String | | Entra ID tenant ID. Required for Service Principal auth. Optional for interactive. |
+| `AccessToken` | SecureString | | Pre-acquired Graph access token. Use with `AzurePowerShell@5` pipelines. |
+| `ClientId` | String | | App (client) ID for Service Principal authentication. |
+| `ClientSecret` | String | | Client secret for Service Principal authentication. |
+| `CertificateThumbprint` | String | | Certificate thumbprint for Service Principal authentication (recommended over secret). |
+| `UseManagedIdentity` | Switch | | Use Azure Managed Identity for Azure-hosted agents or VMs. |
+| `NonInteractive` | Switch | | Suppress all prompts and browser launch. Required for pipelines. |
+| `OnlyWithPermissions` | Switch | | Include only apps with at least one permission. |
+| `MinimumPermissions` | Int | `0` | Include only apps with at least this many permissions. |
+| `OnlyWithAppRegistrations` | Switch | | Include only apps with a linked App Registration in this tenant. |
+| `OnlyServicePrincipals` | Switch | | Include only service principals with no App Registration. |
+| `RiskConfigPath` | String | | Path to a JSON file with custom risk scoring rules. |
+| `Verbose` | Switch | | Enable verbose logging. |
 
 ---
 
-## 🏗️ Azure DevOps Integration
+## Azure DevOps Integration
 
-The script is built for unattended pipeline runs. The recommended approach uses an **Azure service connection** (`azureSubscription`) — no secrets stored in ADO variables.
+The script is built for unattended pipeline runs. The recommended approach uses an **Azure service connection** (`azureSubscription`) so no secrets need to be stored in ADO variables.
 
 ### Prerequisites
 
 1. **Create an Azure service connection** in ADO pointing to your Entra ID tenant.
 
 2. **Grant the service principal** behind the connection these Entra ID **Application permissions** (admin consent required):
-   - `Application.Read.All`
-   - `Directory.Read.All`
-   - `DelegatedPermissionGrant.Read.All`
-   - `RoleManagement.Read.Directory`
+   * `Application.Read.All`
+   * `Directory.Read.All`
+   * `DelegatedPermissionGrant.Read.All`
+   * `RoleManagement.Read.Directory`
 
 3. **Add the pipeline file** (`azure-pipelines.yml`) to your repository and update `azureSubscription` to match your service connection name.
 
@@ -141,11 +142,11 @@ The script is built for unattended pipeline runs. The recommended approach uses 
 A ready-to-use pipeline file is included: [`azure-pipelines.yml`](azure-pipelines.yml)
 
 The pipeline:
-- Runs on a schedule (weekly by default — adjust the cron as needed)
-- Installs Graph modules on the agent
-- Acquires a Graph token from the Az service connection context
-- Runs the report script with `-NonInteractive`
-- Publishes the HTML report as a pipeline artifact
+* Runs on a schedule (weekly by default, adjust the cron as needed)
+* Installs Graph modules on the agent
+* Acquires a Graph token from the Az service connection context
+* Runs the report script with `NonInteractive`
+* Publishes the HTML report as a pipeline artifact
 
 ```yaml
 steps:
@@ -201,16 +202,16 @@ For Azure-hosted agents or VMs with a Managed Identity:
 
 ---
 
-## 🎯 Risk Scoring
+## Risk Scoring
 
 Each application receives a risk score based on weighted factors. The score maps to a risk level:
 
 | Score | Level |
 |---|---|
-| ≥ 30 | 🔴 Critical |
-| ≥ 20 | 🟠 High |
-| ≥ 10 | 🟡 Medium |
-| < 10 | 🟢 Low |
+| 30 or above | 🔴 Critical |
+| 20 or above | 🟠 High |
+| 10 or above | 🟡 Medium |
+| Below 10 | 🟢 Low |
 
 ### Risk Factors
 
@@ -224,14 +225,14 @@ Each application receives a risk score based on weighted factors. The score maps
 | No owners assigned | +5 |
 | No Service Principal owners (only App Reg owners) | +3 |
 | No App Registration owners (only SP owners) | +2 |
-| Ownership gap (SP vs App Reg owners differ) | +2 |
+| Ownership gap between SP and App Reg owners | +2 |
 | Assignment not required (open access) | +4 |
 | Uses password secrets instead of certificates | +5 |
 | Multiple secrets configured | +2 |
-| Long-lived credentials (expiry > 1 year) | +3 |
+| Long-lived credentials (expiry over 1 year) | +3 |
 | No active credentials (app has App Registration) | +4 |
-| External / third-party application | +5 |
-| Sensitive permissions + all-users access | +5 |
+| External third-party application | +5 |
+| Sensitive permissions with all-users access | +5 |
 | Suspicious name keywords | +5 |
 
 ### Custom Risk Configuration
@@ -254,7 +255,7 @@ Example JSON structure:
 
 ---
 
-## 🏷️ App Classification
+## App Classification
 
 Apps are classified into three ownership types:
 
@@ -268,7 +269,7 @@ Apps are classified into three ownership types:
 
 ---
 
-## 🔍 Excluded Applications
+## Excluded Applications
 
 The following internal Microsoft platform services are excluded from the report to reduce noise:
 
@@ -286,31 +287,30 @@ The following internal Microsoft platform services are excluded from the report 
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 EntraID-AppReport/
-├── Get-EntraIDAppReport.ps1     # Main script
+├── Get-EntraIDAppReport.ps1     # Main script (logo inlined, no external dependencies)
 ├── azure-pipelines.yml          # Azure DevOps pipeline
-├── Enterprise Applications.svg  # Logo used in the HTML report
 └── README.md
 ```
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions, issues and feature requests are welcome. Please open an issue before submitting a pull request.
 
 ---
 
-## 📄 License
+## License
 
 MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-## ✍️ Author
+## Author
 
 **Matej Klemencic** — [www.matej.guru](https://www.matej.guru)
 
