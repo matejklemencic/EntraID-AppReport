@@ -591,6 +591,8 @@ function Get-ApplicationCredentials {
         UsesPasswordSecrets  = ($totalActiveSecrets -gt 0)
         SecretCount          = $totalActiveSecrets
         HasLongLivedCredentials = $hasLongLived
+        ActiveCertificateList = @($spActiveCerts) + @($appActiveCerts)
+        ActiveSecretList      = @($spActiveSecrets) + @($appActiveSecrets)
     }
 }
 
@@ -955,7 +957,7 @@ foreach ($sp in $servicePrincipals) {
         HasOwners = $hasOwners
         HasServicePrincipalOwners = $ownerInfo.HasServicePrincipalOwners
         HasAppRegistrationOwners = $ownerInfo.HasAppRegistrationOwners
-        OwnershipGap = ($ownerInfo.HasServicePrincipalOwners -ne $ownerInfo.HasAppRegistrationOwners)
+        OwnershipGap = $credentials.HasAppRegistration -and (($ownerInfo.CombinedOwners | Where-Object { $_.Source -ne 'Both' }).Count -gt 0)
         AssignmentRequired = $assignmentRequired
         IsEnabled = $isEnabled
         
@@ -976,6 +978,8 @@ foreach ($sp in $servicePrincipals) {
         UsesPasswordSecrets     = $credentials.UsesPasswordSecrets
         SecretCount             = $credentials.SecretCount
         HasLongLivedCredentials = $credentials.HasLongLivedCredentials
+        ActiveCertificateList   = $credentials.ActiveCertificateList
+        ActiveSecretList        = $credentials.ActiveSecretList
         
         # Risk assessment
         RiskScore = $riskAssessment.Score
@@ -1438,7 +1442,7 @@ $html = @"
         [data-theme="dark"] .badge.amber  { background: #c87000; }
         [data-theme="dark"] .badge.purple { background: #9070c0; }
 
-        .perm-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+        .perm-badges { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 
         .has-app-reg, .sp-only { color: var(--gray); }
         .internal-app { color: var(--internal); font-weight: 600; }
@@ -1463,6 +1467,31 @@ $html = @"
         .directory-role { color: var(--external); }
 
         details summary { cursor: pointer; color: var(--gray-dark); font-size: 11px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* -- Modal -- */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55); z-index: 1000;
+            align-items: center; justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-box {
+            position: relative;
+            background: var(--bg-panel); color: var(--text);
+            border: 1px solid var(--border); border-radius: 10px;
+            max-width: 720px; width: 90%; max-height: 80vh;
+            overflow-y: auto; padding: 24px 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+        }
+        .modal-box h3 { color: var(--text); margin: 0 0 14px 0; padding-right: 30px; font-size: 15px; }
+        .modal-close {
+            position: absolute; top: 12px; right: 14px;
+            background: none; border: none; color: var(--text-muted);
+            font-size: 22px; cursor: pointer; line-height: 1; padding: 0;
+        }
+        .modal-close:hover { color: var(--text); }
+        #detailModalBody .permission-item { display: block; }
+        @media (max-width: 600px) { .modal-box { width: 95%; max-height: 90vh; padding: 18px; } }
 
         /* -- Footer -- */
         footer.report-footer {
@@ -1607,9 +1636,9 @@ $html = @"
         </div>
         <div class="filter-group">
             <span class="filter-group-label">Credentials</span>
-            <span class="filter-tag c-green" data-group="credentials" data-value="active" onclick="toggleTag(this)">Active <span class="cnt"></span></span>
-            <span class="filter-tag c-gray"  data-group="credentials" data-value="none"   onclick="toggleTag(this)">None <span class="cnt"></span></span>
-            <span class="filter-tag c-amber" data-group="credentials" data-value="expiring" onclick="toggleTag(this)">Expiring <span class="cnt"></span></span>
+            <span class="filter-tag c-green" data-group="credentials" data-value="certs"    onclick="toggleTag(this)">Has Certs <span class="cnt"></span></span>
+            <span class="filter-tag c-amber" data-group="credentials" data-value="secrets"  onclick="toggleTag(this)">Has Secrets <span class="cnt"></span></span>
+            <span class="filter-tag c-red"   data-group="credentials" data-value="expiring" onclick="toggleTag(this)">Expiring <span class="cnt"></span></span>
         </div>
 
         <div class="filter-results">
@@ -1632,9 +1661,7 @@ $html = @"
                 <th onclick="sortTable(6, 'string')">Owners</th>
                 <th onclick="sortTable(7, 'string')">Risk Level</th>
                 <th>Permissions</th>
-                <th>Permissions Detail</th>
-                <th onclick="sortTable(10, 'string')">Active Credentials</th>
-                <th>Risk Factors</th>
+                <th onclick="sortTable(9, 'string')">Credentials</th>
             </tr>
         </thead>
         <tbody>
@@ -1642,6 +1669,7 @@ $html = @"
 
 # Sort by risk score (descending), then by total permissions (descending)
 $sortedReport = $report | Sort-Object @{Expression="RiskScore"; Descending=$true}, @{Expression="TotalPermissions"; Descending=$true}
+$modalDataEntries = [System.Collections.Generic.List[string]]::new()
 
 foreach ($app in $sortedReport) {
     $riskClass = "risk-" + $app.RiskLevel.ToLower()
@@ -1656,9 +1684,9 @@ foreach ($app in $sortedReport) {
     $isMicrosoft = $app.AppOwnerOrganizationId -in $script:MicrosoftTenantIds
     $ownershipType = if ($isInternal) { "internal" } elseif ($isMicrosoft) { "microsoft" } else { "third-party" }
     $ownershipText = switch ($ownershipType) {
-        "internal"    { "<span class='badge green clickable-badge' data-fg='ownership' data-fv='internal' title='App registered in this tenant and owned by your organization'>Internal</span>" }
-        "microsoft"   { "<span class='badge blue clickable-badge' data-fg='ownership' data-fv='microsoft' title='App owned by Microsoft. This is a first party Microsoft service'>Microsoft</span>" }
-        "third-party" { "<span class='badge red clickable-badge' data-fg='ownership' data-fv='third-party' title='App registered in another tenant. This is a third party service'>Third-Party</span>" }
+        "internal"    { "<span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App registered in this tenant and owned by your organization'>Internal</span>" }
+        "microsoft"   { "<span class='badge blue' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App owned by Microsoft. This is a first party Microsoft service'>Microsoft</span>" }
+        "third-party" { "<span class='badge red' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App registered in another tenant. This is a third party service'>Third-Party</span>" }
     }
     $ownershipClass = switch ($ownershipType) {
         "internal"    { "internal-app" }
@@ -1674,16 +1702,16 @@ foreach ($app in $sortedReport) {
     $ownersText = if ($app.HasOwners) {
         $spOwnerCount = $app.ServicePrincipalOwners.Count
         $appRegOwnerCount = $app.AppRegistrationOwners.Count
-        
-        $ownerDisplay = "<span class='badge blue clickable-badge' data-fg='owners' data-fv='has' title='Users or service principals responsible for managing this app'>$($app.Owners.Count) owner(s)</span> "
-        
+
+        $ownerDisplay = "<span class='badge blue' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownersTitle,reportDetails['$($app.AppId)'].ownersHtml)`" style='cursor:pointer' title='Users or service principals responsible for managing this app — click to view details'>$($app.Owners.Count) owner(s)</span> "
+
         $isInternalApp = $app.AppOwnerOrganizationId -eq $tenantId
-        if (($app.OwnershipGap -or ($spOwnerCount -ne $appRegOwnerCount)) -and $isInternalApp -and $app.HasAppRegistration) {
-            $ownerDisplay += "<span class='badge amber clickable-badge' data-fg='owners' data-fv='gap' title='Not all owners are assigned to both the Service Principal and the App Registration'>Ownership Gap</span>"
+        if ($app.OwnershipGap -and $isInternalApp) {
+            $ownerDisplay += "<span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipGapTitle,reportDetails['$($app.AppId)'].ownershipGapHtml)`" style='cursor:pointer' title='Not all owners are assigned to both the Service Principal and the App Registration — click to view details'>Ownership Gap</span>"
         }
         $ownerDisplay
     } else {
-        "<span class='badge gray clickable-badge' data-fg='owners' data-fv='noowners' title='No owner is assigned. Changes can only be made by a privileged administrator'>No owners</span>"
+        "<span class='badge gray' title='No owner is assigned. Changes can only be made by a privileged administrator'>No owners</span>"
     }
     
     # Determine ownership CSS class
@@ -1696,17 +1724,28 @@ foreach ($app in $sortedReport) {
         "no-owners" 
     }
     
-    $credentialsInfo = "$($app.ActiveSecrets) secrets, $($app.ActiveCertificates) certs"
-    $expiringBadge = ""
-    if ($app.ExpiringCredentials -gt 0) {
-        $expiringBadge = "<span class='badge amber clickable-badge' data-fg='credentials' data-fv='expiring' title='Credentials expiring within 30 days. Renew them to avoid authentication failures'>$($app.ExpiringCredentials) expiring</span>"
+    if ($app.ActiveCertificates -gt 0) {
+        $certsBadge = "<span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].certsTitle,reportDetails['$($app.AppId)'].certsHtml)`" style='cursor:pointer' title='Active certificate credentials — click to view details'>Certs: $($app.ActiveCertificates)</span>"
+    } else {
+        $certsBadge = "<span class='badge gray' title='No active certificates'>Certs: 0</span>"
     }
-    $credentialStatus = if ($app.HasActiveCredentials) { "<span class='badge green clickable-badge' data-fg='credentials' data-fv='active' title='App has active secrets or certificates used for authentication'>Active</span>" } else { "<span class='badge gray clickable-badge' data-fg='credentials' data-fv='none' title='No active credentials found. The app may use federated identity or may be inactive'>None</span>" }
-    $credStatusValue = if ($app.HasActiveCredentials) { "active" } else { "none" }
+    if ($app.ActiveSecrets -gt 0) {
+        $secretsBadge = "<span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].secretsTitle,reportDetails['$($app.AppId)'].secretsHtml)`" style='cursor:pointer' title='Active client secret credentials — click to view details'>Secrets: $($app.ActiveSecrets)</span>"
+    } else {
+        $secretsBadge = "<span class='badge gray' title='No active secrets'>Secrets: 0</span>"
+    }
+    $expiringBadgeHtml = ""
+    if ($app.ExpiringCredentials -gt 0) {
+        $expiringBadgeHtml = "<span class='badge red' title='Credentials expiring within 30 days. Renew them to avoid authentication failures'>Expiring: $($app.ExpiringCredentials)</span>"
+    }
+    $hasCertsValue = if ($app.ActiveCertificates -gt 0) { "yes" } else { "no" }
+    $hasSecretsValue = if ($app.ActiveSecrets -gt 0) { "yes" } else { "no" }
     $expiringValue = if ($app.ExpiringCredentials -gt 0) { "yes" } else { "no" }
     
-    # Build permission details with clear type indicators
-    $permissionDetails = ""
+    # Build scoped permission HTML — one accumulator per type (single pass)
+    $appPermItems       = ""
+    $delegatedPermItems = ""
+    $rolePermItems      = ""
     foreach ($perm in $app.Permissions) {
         $permClass = switch ($perm.Type) {
             "Application"    { "app-permission" }
@@ -1716,12 +1755,21 @@ foreach ($app in $sortedReport) {
         $safePermName = ConvertTo-HtmlSafe $perm.Permission
         $safeResource = ConvertTo-HtmlSafe $perm.Resource
         if ($perm.Type -ne "Directory Role") {
-            $permLink = "<a href='https://graphpermissions.merill.net/permission/$safePermName' target='_blank' title='View $safePermName on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
+            $urlPermName = [Uri]::EscapeDataString($perm.Permission)
+            $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPermName' target='_blank' title='View $safePermName on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
         } else {
             $permLink = $safePermName
         }
-        $permissionDetails += "<div class='permission-item $permClass'><strong>[$($perm.Type)]</strong> $permLink on <em>$safeResource</em></div>"
+        $item = "<div class='permission-item $permClass'><strong>[$($perm.Type)]</strong> $permLink on <em>$safeResource</em></div>"
+        switch ($perm.Type) {
+            "Application"    { $appPermItems       += $item }
+            "Delegated"      { $delegatedPermItems += $item }
+            "Directory Role" { $rolePermItems      += $item }
+        }
     }
+    if (-not $appPermItems)       { $appPermItems       = "No application permissions assigned" }
+    if (-not $delegatedPermItems) { $delegatedPermItems = "No delegated permissions assigned" }
+    if (-not $rolePermItems)      { $rolePermItems      = "No directory roles assigned" }
 
     # Build risk factors — escape each item as it may contain API-sourced permission/app names
     $riskFactorsHtml = if ($app.RiskFactors.Count -gt 0) {
@@ -1740,10 +1788,19 @@ foreach ($app in $sortedReport) {
         default    { "gray" }
     }
     
-    # Permission breakdown badges
-    $appPermBadge = if ($app.ApplicationPermissions -gt 0) { "<span class='badge orange clickable-badge' data-fg='permissions' data-fv='application' title='Application permissions grant access without a signed-in user and are typically high privilege'>App: $($app.ApplicationPermissions)</span>" } else { "<span class='badge gray'>App: 0</span>" }
-    $delegatedPermBadge = if ($app.DelegatedPermissions -gt 0) { "<span class='badge blue clickable-badge' data-fg='permissions' data-fv='delegated' title='Delegated permissions act on behalf of a signed-in user'>Delegated: $($app.DelegatedPermissions)</span>" } else { "<span class='badge gray'>Delegated: 0</span>" }
-    $rolePermBadge = if ($app.DirectoryRoles -gt 0) { "<span class='badge red clickable-badge' data-fg='permissions' data-fv='roles' title='App has been assigned Entra ID directory roles which grant broad administrative capabilities'>Roles: $($app.DirectoryRoles)</span>" } else { "<span class='badge gray'>Roles: 0</span>" }
+    $safeDisplayName = ConvertTo-HtmlSafe $app.DisplayName
+    $safeKey = $app.AppId
+
+    # Permission badges — badge itself is the modal trigger when count > 0
+    $appPermBadge = if ($app.ApplicationPermissions -gt 0) {
+        "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$safeKey'].appPermsTitle,reportDetails['$safeKey'].appPermsHtml)`" style='cursor:pointer' title='Application permissions grant access without a signed-in user and are typically high privilege'>App: $($app.ApplicationPermissions)</span>"
+    } else { "<span class='badge gray'>App: 0</span>" }
+    $delegatedPermBadge = if ($app.DelegatedPermissions -gt 0) {
+        "<span class='badge blue' onclick=`"openDetailModal(reportDetails['$safeKey'].delegatedPermsTitle,reportDetails['$safeKey'].delegatedPermsHtml)`" style='cursor:pointer' title='Delegated permissions act on behalf of a signed-in user'>Delegated: $($app.DelegatedPermissions)</span>"
+    } else { "<span class='badge gray'>Delegated: 0</span>" }
+    $rolePermBadge = if ($app.DirectoryRoles -gt 0) {
+        "<span class='badge red' onclick=`"openDetailModal(reportDetails['$safeKey'].rolePermsTitle,reportDetails['$safeKey'].rolePermsHtml)`" style='cursor:pointer' title='App has been assigned Entra ID directory roles which grant broad administrative capabilities'>Roles: $($app.DirectoryRoles)</span>"
+    } else { "<span class='badge gray'>Roles: 0</span>" }
     $permissionSummary = "$appPermBadge $delegatedPermBadge $rolePermBadge"
     $riskTitle = switch ($app.RiskLevel) {
         "Critical" { "Critical risk. Immediate review required. This app has a combination of high privilege permissions, active credentials and missing controls" }
@@ -1752,39 +1809,107 @@ foreach ($app in $sortedReport) {
         "Low"      { "Low risk. No significant security concerns detected at this time" }
         default    { "Risk level not calculated" }
     }
-
-    
-    $safeDisplayName = ConvertTo-HtmlSafe $app.DisplayName
+    $riskBadge = if ($app.RiskFactors.Count -gt 0) {
+        "<span class='badge $riskBadgeColor' onclick=`"openDetailModal(reportDetails['$safeKey'].riskTitle,reportDetails['$safeKey'].riskHtml)`" style='cursor:pointer' title='$riskTitle'>$($app.RiskLevel)</span>"
+    } else {
+        "<span class='badge $riskBadgeColor' title='$riskTitle'>$($app.RiskLevel)</span>"
+    }
+    $appPermsModalTitle       = "Application Permissions for $($app.DisplayName) ($($app.ApplicationPermissions))"
+    $delegatedPermsModalTitle = "Delegated Permissions for $($app.DisplayName) ($($app.DelegatedPermissions))"
+    $rolePermsModalTitle      = "Directory Roles for $($app.DisplayName) ($($app.DirectoryRoles))"
+    $riskModalTitle           = "Risk Analysis for $($app.DisplayName) ($($app.RiskFactors.Count) factors)"
+    # Certificate modal
+    $certsModalTitle = "Certificates for $($app.DisplayName) ($($app.ActiveCertificates) active)"
+    if ($app.ActiveCertificateList -and $app.ActiveCertificateList.Count -gt 0) {
+        $certRows = ($app.ActiveCertificateList | ForEach-Object {
+            $cName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
+            $cStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
+            $cEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
+            $cKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
+            "<tr><td style='padding:4px 8px'>$cName</td><td style='padding:4px 8px'>$cStart</td><td style='padding:4px 8px'>$cEnd</td><td style='padding:4px 8px'><code>$cKeyId</code></td></tr>"
+        }) -join ""
+        $certsModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$certRows</tbody></table>"
+    } else {
+        $certsModalHtml = "No active certificates"
+    }
+    # Secret modal
+    $secretsModalTitle = "Client Secrets for $($app.DisplayName) ($($app.ActiveSecrets) active)"
+    if ($app.ActiveSecretList -and $app.ActiveSecretList.Count -gt 0) {
+        $secretRows = ($app.ActiveSecretList | ForEach-Object {
+            $sName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
+            $sStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
+            $sEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
+            $sKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
+            "<tr><td style='padding:4px 8px'>$sName</td><td style='padding:4px 8px'>$sStart</td><td style='padding:4px 8px'>$sEnd</td><td style='padding:4px 8px'><code>$sKeyId</code></td></tr>"
+        }) -join ""
+        $secretsModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$secretRows</tbody></table>"
+    } else {
+        $secretsModalHtml = "No active secrets"
+    }
+    # Ownership modal
+    $ownershipLabel = switch ($ownershipType) {
+        "internal"    { "Internal (registered in this tenant)" }
+        "microsoft"   { "Microsoft (first-party service)" }
+        "third-party" { "Third-Party (registered in external tenant)" }
+    }
+    $safeOrgId = ConvertTo-HtmlSafe "$($app.AppOwnerOrganizationId)"
+    $ownershipModalTitle = "App Ownership for $($app.DisplayName)"
+    $ownershipModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type</td><td style='padding:6px 8px'>$ownershipLabel</td></tr><tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID</td><td style='padding:6px 8px'><code>$safeOrgId</code></td></tr></tbody></table>"
+    # Owners modal — all owners with Enterprise App / App Registration coverage
+    $ownersModalTitle = "Owners for $($app.DisplayName) ($($app.Owners.Count) total)"
+    if ($app.Owners -and $app.Owners.Count -gt 0) {
+        $ownerRows = ($app.Owners | ForEach-Object {
+            $oName = ConvertTo-HtmlSafe $_.DisplayName
+            $oUpn  = ConvertTo-HtmlSafe "$($_.UserPrincipalName)"
+            $oType = ConvertTo-HtmlSafe $_.Type
+            $onSp  = if ($_.Source -eq 'ServicePrincipal' -or $_.Source -eq 'Both') { "&#10003;" } else { "&#8212;" }
+            $onApp = if ($_.Source -eq 'AppRegistration'  -or $_.Source -eq 'Both') { "&#10003;" } else { "&#8212;" }
+            "<tr><td style='padding:4px 8px'>$oName</td><td style='padding:4px 8px'>$oType</td><td style='padding:4px 8px'><small>$oUpn</small></td><td style='padding:4px 8px;text-align:center'>$onSp</td><td style='padding:4px 8px;text-align:center'>$onApp</td></tr>"
+        }) -join ""
+        $ownersModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App</th><th style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration</th></tr></thead><tbody>$ownerRows</tbody></table>"
+    } else {
+        $ownersModalHtml = "No owners assigned"
+    }
+    # Ownership Gap modal — owners not present on both sides
+    $ownershipGapModalTitle = "Ownership Gap for  $($app.DisplayName)"
+    $gapOwners = @($app.Owners | Where-Object { $_.Source -ne 'Both' })
+    if ($gapOwners.Count -gt 0) {
+        $gapRows = ($gapOwners | ForEach-Object {
+            $gName  = ConvertTo-HtmlSafe $_.DisplayName
+            $gUpn   = ConvertTo-HtmlSafe "$($_.UserPrincipalName)"
+            $gType  = ConvertTo-HtmlSafe $_.Type
+            $gWhere = switch ($_.Source) {
+                'ServicePrincipal' { "Enterprise App only" }
+                'AppRegistration'  { "App Registration only" }
+                default            { ConvertTo-HtmlSafe $_.Source }
+            }
+            "<tr><td style='padding:4px 8px'>$gName</td><td style='padding:4px 8px'>$gType</td><td style='padding:4px 8px'><small>$gUpn</small></td><td style='padding:4px 8px'>$gWhere</td></tr>"
+        }) -join ""
+        $ownershipGapModalHtml = "<p style='margin:0 0 10px 0;font-size:13px'>Owners not assigned to both the Enterprise App and the App Registration:</p><table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Assigned To</th></tr></thead><tbody>$gapRows</tbody></table>"
+    } else {
+        $ownershipGapModalHtml = "No ownership gap detected. All owners are assigned to both the Enterprise App and App Registration."
+    }
+    $modalDataEntries.Add("`"$safeKey`": { appPermsTitle: $(ConvertTo-Json $appPermsModalTitle -Compress), appPermsHtml: $(ConvertTo-Json $appPermItems -Compress), delegatedPermsTitle: $(ConvertTo-Json $delegatedPermsModalTitle -Compress), delegatedPermsHtml: $(ConvertTo-Json $delegatedPermItems -Compress), rolePermsTitle: $(ConvertTo-Json $rolePermsModalTitle -Compress), rolePermsHtml: $(ConvertTo-Json $rolePermItems -Compress), riskTitle: $(ConvertTo-Json $riskModalTitle -Compress), riskHtml: $(ConvertTo-Json $riskFactorsHtml -Compress), certsTitle: $(ConvertTo-Json $certsModalTitle -Compress), certsHtml: $(ConvertTo-Json $certsModalHtml -Compress), secretsTitle: $(ConvertTo-Json $secretsModalTitle -Compress), secretsHtml: $(ConvertTo-Json $secretsModalHtml -Compress), ownershipTitle: $(ConvertTo-Json $ownershipModalTitle -Compress), ownershipHtml: $(ConvertTo-Json $ownershipModalHtml -Compress), ownersTitle: $(ConvertTo-Json $ownersModalTitle -Compress), ownersHtml: $(ConvertTo-Json $ownersModalHtml -Compress), ownershipGapTitle: $(ConvertTo-Json $ownershipGapModalTitle -Compress), ownershipGapHtml: $(ConvertTo-Json $ownershipGapModalHtml -Compress) }")
     $html += @"
-            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-credstatus="$credStatusValue" data-expiring="$expiringValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
+            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
                 <td><a class="app-name" href="$portalUrl" target="_blank" title="Open in Entra portal">$safeDisplayName</a></td>
                 <td class="$enabledClass">$enabledText</td>
                 <td><code class="mono">$($app.AppId)</code></td>
-                <td class="$ownershipClass">$ownershipText<br><small class="muted tiny">$($app.AppOwnerOrganizationId)</small></td>
+                <td class="$ownershipClass">$ownershipText</td>
                 <td class="$appRegClass">$appRegText</td>
                 <td class="$assignmentRequiredClass">$assignmentRequiredText</td>
                 <td class="$ownersClass cell-sm">$ownersText</td>
-                <td><span class="badge $riskBadgeColor clickable-badge" data-fg="risk" data-fv="$($app.RiskLevel)" title="$riskTitle">$($app.RiskLevel)</span></td>
-                <td><span class="perm-badges">$permissionSummary</span></td>
-                <td class="cell-sm">
-                    <details>
-                        <summary>View Permissions ($($app.TotalPermissions))</summary>
-                        <div class="permission-list">$permissionDetails</div>
-                    </details>
-                </td>
-                <td class="cell-sm">
-                    $credentialStatus<br>
-                    $(if ($expiringBadge) { "$expiringBadge<br>" })$credentialsInfo
-                </td>
-                <td class="cell-sm">
-                    <details>
-                        <summary>Risk Analysis ($($app.RiskFactors.Count))</summary>
-                        $riskFactorsHtml
-                    </details>
-                </td>
+                <td class="cell-sm">$riskBadge</td>
+                <td class="cell-sm"><span class="perm-badges">$permissionSummary</span></td>
+                <td class="cell-sm">$certsBadge $secretsBadge$(if ($expiringBadgeHtml) { " $expiringBadgeHtml" })</td>
             </tr>
 "@
 }
+
+$reportDetailsBlock = "const reportDetails = {`n" + ($modalDataEntries -join ",`n") + "`n};"
+# PS 5.1 ConvertTo-Json does not escape < or >, so </script> inside a string value would
+# break out of the <script> block. Replace </ with <\/ (valid in JSON) to prevent this.
+$reportDetailsBlock = $reportDetailsBlock -replace '</', '<\/'
 
 $html += @"
         </tbody>
@@ -1792,6 +1917,8 @@ $html += @"
     </div>
 
     <script>
+        $reportDetailsBlock
+
         // Active filters: group -> Set of selected values (OR within a group, AND across groups)
         const activeFilters = {};
         const groupLabels = {
@@ -1805,7 +1932,7 @@ $html += @"
             required: 'Required', 'not-required': 'Open Access',
             has: 'Has Owners', noowners: 'No Owners', gap: 'Ownership Gap',
             application: 'Application', delegated: 'Delegated', roles: 'Roles', none: 'None',
-            active: 'Active', expiring: 'Expiring'
+            certs: 'Has Certs', secrets: 'Has Secrets', expiring: 'Expiring'
         };
 
         function rowMatchesTag(row, group, value) {
@@ -1819,7 +1946,11 @@ $html += @"
                     if (value === 'noowners') return row.dataset.owners === 'no';
                     if (value === 'gap')      return row.dataset.ownershipgap === 'yes';
                     return false;
-                case 'credentials': return value === 'expiring' ? row.dataset.expiring === 'yes' : row.dataset.credstatus === value;
+                case 'credentials':
+                    if (value === 'certs')    return row.dataset.hascerts === 'yes';
+                    if (value === 'secrets')  return row.dataset.hassecrets === 'yes';
+                    if (value === 'expiring') return row.dataset.expiring === 'yes';
+                    return false;
                 case 'enabled':     return row.dataset.enabled === value;
                 case 'permissions': {
                     const a = parseInt(row.dataset.apppermcount) || 0;
@@ -1988,9 +2119,11 @@ $html += @"
 
             const lines = [headers.map(esc).join(',')];
             visibleRows.forEach(tr => {
-                const cells = Array.from(tr.cells).map(td =>
-                    esc(td.textContent.trim().replace(/\s+/g, ' '))
-                );
+                const cells = Array.from(tr.cells).map(td => {
+                    const clone = td.cloneNode(true);
+                    clone.querySelectorAll('.csv-exclude').forEach(n => n.remove());
+                    return esc(clone.textContent.trim().replace(/\s+/g, ' '));
+                });
                 lines.push(cells.join(','));
             });
 
@@ -2004,6 +2137,22 @@ $html += @"
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        let _modalTrigger = null;
+
+        function openDetailModal(title, html) {
+            _modalTrigger = document.activeElement;
+            document.getElementById('detailModalTitle').textContent = title;
+            document.getElementById('detailModalBody').innerHTML = html;
+            document.getElementById('detailModalOverlay').classList.add('active');
+            document.querySelector('#detailModalOverlay .modal-box').scrollTop = 0;
+            document.querySelector('.modal-close').focus();
+        }
+
+        function closeDetailModal() {
+            document.getElementById('detailModalOverlay').classList.remove('active');
+            if (_modalTrigger) { _modalTrigger.focus(); _modalTrigger = null; }
         }
 
         function toggleTheme() {
@@ -2039,10 +2188,22 @@ $html += @"
                 document.getElementById('reportTable').scrollIntoView({ behavior: 'smooth', block: 'start' });
             });
 
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') closeDetailModal();
+            });
+
             computeTagCounts();
             applyFilters();
         })();
     </script>
+
+    <div id="detailModalOverlay" class="modal-overlay" onclick="if(event.target===this) closeDetailModal()">
+        <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle" aria-describedby="detailModalBody">
+            <button class="modal-close" onclick="closeDetailModal()" aria-label="Close">&times;</button>
+            <h3 id="detailModalTitle"></h3>
+            <div id="detailModalBody"></div>
+        </div>
+    </div>
     </div>
 
     <footer class="report-footer">
