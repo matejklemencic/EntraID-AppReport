@@ -166,24 +166,24 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 
 | Signal | Points |
 |--------|--------|
+| Each unique high-risk directory role (e.g. Global Administrator, Security Administrator) | +15 |
 | Each unique high-risk permission (e.g. `Directory.ReadWrite.All`, `User.ReadWrite.All`) | +10 |
+| Each other directory role | +8 |
 | Each unique medium-risk permission (e.g. `Directory.Read.All`, `Mail.Send`) | +5 |
 | Has any application permissions (bonus, counted once) | +5 |
-| Each unique high-risk directory role (e.g. Global Administrator, Security Administrator) | +15 |
-| Each other directory role | +8 |
 | Suspicious keyword in display name (e.g. `test`, `admin`, `temp`, `legacy`) | +5 |
 | Sensitive permissions assigned to all users | +5 |
-| Sensitive permissions affecting more than 50 users | +3 |
-| No active credentials on an app with an App Registration | +4 |
 | No owners on either Service Principal or App Registration | +5 |
+| Uses password secrets instead of certificates | +5 |
+| External application (registered in another tenant, not Microsoft) | +5 |
+| No active credentials on an app with an App Registration | +4 |
+| Assignment not required (open access) | +4 |
+| Sensitive permissions affecting more than 50 users | +3 |
 | No Service Principal owners (App Registration owners only) | +3 |
+| Long-lived credentials (expiry > 1 year) | +3 |
 | No App Registration owners (Service Principal owners only) | +2 |
 | Ownership gap (SP and App Reg owner sets differ) | +2 |
-| Assignment not required (open access) | +4 |
-| Uses password secrets instead of certificates | +5 |
 | Multiple secrets configured | +2 |
-| Long-lived credentials (expiry > 1 year) | +3 |
-| External application (registered in another tenant, not Microsoft) | +5 |
 
 ### Disabled app adjustment
 

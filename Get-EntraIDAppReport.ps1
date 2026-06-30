@@ -1562,7 +1562,7 @@ $html = @"
     </div>
 
     <div class="controls" id="controlsPanel" hidden>
-        <input type="text" id="searchInput" class="filter-search" placeholder="Search by application name..." onkeyup="applyFilters()">
+        <input type="text" id="searchInput" class="filter-search" placeholder="Search by application name or App ID..." onkeyup="applyFilters()">
 
         <div class="filter-group">
             <span class="filter-group-label">Ownership</span>
@@ -1756,7 +1756,7 @@ foreach ($app in $sortedReport) {
     
     $safeDisplayName = ConvertTo-HtmlSafe $app.DisplayName
     $html += @"
-            <tr class="$riskClass" data-name="$safeDisplayName" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-credstatus="$credStatusValue" data-expiring="$expiringValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
+            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-credstatus="$credStatusValue" data-expiring="$expiringValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
                 <td><a class="app-name" href="$portalUrl" target="_blank" title="Open in Entra portal">$safeDisplayName</a></td>
                 <td class="$enabledClass">$enabledText</td>
                 <td><code class="mono">$($app.AppId)</code></td>
@@ -1836,7 +1836,11 @@ $html += @"
 
         function rowVisible(row) {
             const search = document.getElementById('searchInput').value.toLowerCase().trim();
-            if (search && !(row.dataset.name || '').toLowerCase().includes(search)) return false;
+            if (search) {
+                const nameMatch  = (row.dataset.name  || '').toLowerCase().includes(search);
+                const appIdMatch = (row.dataset.appid || '').toLowerCase().includes(search);
+                if (!nameMatch && !appIdMatch) return false;
+            }
             for (const group in activeFilters) {
                 const vals = activeFilters[group];
                 if (!vals || vals.size === 0) continue;
