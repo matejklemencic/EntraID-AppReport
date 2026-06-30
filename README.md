@@ -8,8 +8,8 @@ The script connects to Microsoft Graph, retrieves every Enterprise Application r
 
 - **Permissions**: application permissions (app roles) and delegated permissions (OAuth2 grants), including the resource they are granted against
 - **Directory roles**: Entra ID directory roles assigned directly to the service principal
-- **Ownership**: owners on both the Service Principal and its backing App Registration, with gap detection when the two ownership sets diverge
-- **Credentials**: secrets and certificates on the App Registration, including expiry, type (secret vs certificate), and long-lived credential detection
+- **Ownership**: owners on both the Service Principal and its backing App Registration, with gap detection when the two ownership sets diverge; owners are tracked separately for the Enterprise App and the App Registration
+- **Credentials**: active certificates and client secrets on the App Registration counted separately, including expiry detection within 30 days and long-lived credential detection
 - **Risk scoring**: a weighted score per app based on the above signals, producing a Critical / High / Medium / Low classification
 - **Governance signals**: whether assignment is required, whether the app is enabled or disabled, whether it is internal, Microsoft-owned, or third-party
 
@@ -26,11 +26,29 @@ The output is a single `.html` file that works offline with no external dependen
 | Export CSV | Downloads the currently visible (filtered) rows as a `.csv` file, UTF-8 with BOM for correct Excel rendering |
 | Dark / light mode | Toggle persisted to `localStorage` |
 | Portal deep links | Application name links directly to the Entra portal entry for that app |
-| Risk factors | Expandable per-app list of every signal that contributed to the risk score |
+| Detail modals | Clickable badges throughout the report open a detail panel with full information — see [Interactive badges](#interactive-badges) |
 
 ## Example
 
 ![Entra ID App Report example screenshot](EntraIDAppReport_Example.png)
+
+## Interactive badges
+
+Most badges in the report table are clickable and open a detail modal with additional information. Badges that only act as filters (Enabled, App Registration, Assignment Required) are not modal triggers.
+
+| Column | Badge | Modal content |
+|--------|-------|---------------|
+| App Ownership | Internal / Microsoft / Third-Party | Tenant ID, tenant name, and registration details for the app |
+| Permissions | App: N | Full list of application permissions with resource and description |
+| Permissions | Delegated: N | Full list of delegated permissions with resource and description |
+| Permissions | Roles: N | Full list of directory roles assigned to the service principal |
+| Risk | Critical / High / Medium / Low | Every risk signal that contributed to the score, with individual point values |
+| Credentials | Certs: N | Each active certificate: display name, Key ID, valid from, and expiry date |
+| Credentials | Secrets: N | Each active client secret: display name, Key ID, created date, and expiry date |
+| Credentials | Expiring: N | Plain badge only — no modal; use the filter panel to isolate expiring apps |
+| Owners | N owner(s) | All owners listed with their coverage (Enterprise App, App Registration, or both) |
+| Owners | Ownership Gap | Owners that are not assigned to both the Service Principal and the App Registration |
+| Owners | No owners | Plain badge — no modal |
 
 ## Prerequisites
 
