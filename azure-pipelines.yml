@@ -30,29 +30,25 @@ steps:
   - task: AzurePowerShell@5
     displayName: "Generate Entra ID App Report"
     inputs:
-      azureSubscription: "YOUR-SERVICE-CONNECTION-NAME"   # <-- update this
+      azureSubscription: "SPAN.M365Assessment.ReadOnly.Dev"   # <-- update this
       pwsh: true
       azurePowerShellVersion: LatestVersion
       ScriptType: InlineScript
       Inline: |
         # Install required Microsoft Graph modules
         Write-Host "##[section]Installing Microsoft Graph modules..."
-        Install-Module -Name Microsoft.Graph.Authentication,
-          Microsoft.Graph.Applications,
-          Microsoft.Graph.Identity.DirectoryManagement,
-          Microsoft.Graph.Users `
-          -Force -AllowClobber -Scope CurrentUser
-
-        # Get tenant ID and Graph access token from the Az service connection context
-        $tenantId = (Get-AzContext).Tenant.Id
-        Write-Host "##[section]Tenant: $tenantId"
-
-        $rawToken = (Get-AzAccessToken -ResourceTypeName MSGraph).Token
-        $graphToken = if ($rawToken -is [System.Security.SecureString]) {
-            $rawToken
-        } else {
-            ConvertTo-SecureString $rawToken -AsPlainText -Force
+        @(
+            'Microsoft.Graph.Authentication',
+            'Microsoft.Graph.Applications',
+            'Microsoft.Graph.Identity.DirectoryManagement',
+            'Microsoft.Graph.Identity.SignIns',
+            'Microsoft.Graph.Users'
+        ) | ForEach-Object {
+            Install-Module -Name $_ -MinimumVersion '2.0.0' -Force -AllowClobber -Scope CurrentUser
         }
+
+        # Get Graph access token from the Az service connection context
+        $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -AsSecureString).Token
 
         # Run the report
         $outputPath = "$(Build.ArtifactStagingDirectory)/EntraIDReport_$(Get-Date -Format 'yyyy-MM-dd').html"

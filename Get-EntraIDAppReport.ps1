@@ -9,8 +9,15 @@
 .AUTHOR
     Matej Klemencic (www.matej.guru)
 .NOTES
-    Version:        1.4
-    Last Modified:  2026-06-21
+    Version:        1.5
+    Last Modified:  2026-06-28
+
+    Installation: Install the required Microsoft Graph modules (install each separately to use -MinimumVersion):
+    @('Microsoft.Graph.Authentication','Microsoft.Graph.Applications','Microsoft.Graph.Identity.SignIns','Microsoft.Graph.Identity.DirectoryManagement','Microsoft.Graph.Users') | ForEach-Object { Install-Module $_ -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber }
+    Or install the full umbrella module:
+    Install-Module -Name Microsoft.Graph -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber
+.OUTPUTS
+    None. Writes an HTML report to the file specified by -OutputPath.
 .PARAMETER OutputPath
     Path to save the generated HTML report. Defaults to "EntraIDReport_{TenantName}_{Date}.html".
 .PARAMETER TenantId
@@ -22,9 +29,6 @@
 .PARAMETER ClientId
     Optional. The Application (client) ID of a Service Principal for unattended/pipeline authentication.
     Must be combined with either -ClientSecret or -CertificateThumbprint and -TenantId.
-.PARAMETER ClientSecret
-    Optional. The client secret for Service Principal authentication. Use with -ClientId and -TenantId.
-    For production pipelines, prefer certificate authentication or Managed Identity.
 .PARAMETER CertificateThumbprint
     Optional. Certificate thumbprint for Service Principal authentication. Use with -ClientId and -TenantId.
 .PARAMETER UseManagedIdentity
@@ -39,12 +43,20 @@
     Include only applications with total permission count >= this number. Default is 0 (no minimum).
 .PARAMETER RiskConfigPath
     Path to a JSON file with custom risk scoring configuration. If provided and valid, overrides default risk rules.
+    Expected JSON schema:
+    {
+        "HighRiskPermissions":    [ "<permission>", ... ],
+        "MediumRiskPermissions":  [ "<permission>", ... ],
+        "HighRiskDirectoryRoles": [ "<role name>", ... ],
+        "SuspiciousKeywords":     [ "<keyword>", ... ]
+    }
 .PARAMETER OnlyWithAppRegistrations
     Include only applications that have a corresponding App Registration in the tenant.
 .PARAMETER OnlyServicePrincipals
     Include only service principals without an App Registration (e.g. gallery or legacy apps).
-.PARAMETER Verbose
-    Enable verbose logging for troubleshooting.
+.PARAMETER DryRun
+    Optional. When set, skips writing the HTML report to disk and skips launching the browser.
+    Useful for testing parameter validation and authentication without side effects.
 .EXAMPLE
     # Interactive: generate a report for the default tenant
     .\Get-EntraIDAppReport.ps1
@@ -59,9 +71,6 @@
     # Service Principal with certificate (recommended for pipelines)
     .\Get-EntraIDAppReport.ps1 -TenantId "tenant-id" -ClientId "app-id" -CertificateThumbprint "thumbprint" -NonInteractive
 .EXAMPLE
-    # Service Principal with client secret
-    .\Get-EntraIDAppReport.ps1 -TenantId "tenant-id" -ClientId "app-id" -ClientSecret "secret" -NonInteractive
-.EXAMPLE
     # Managed Identity (Azure DevOps / Azure-hosted agent)
     .\Get-EntraIDAppReport.ps1 -UseManagedIdentity -NonInteractive -OutputPath "$(Build.ArtifactStagingDirectory)\report.html"
 .EXAMPLE
@@ -73,17 +82,9 @@
 .EXAMPLE
     # List only apps with at least 5 permissions
     .\Get-EntraIDAppReport.ps1 -MinimumPermissions 5
-.INSTALLATION
-    Install the required Microsoft Graph modules:
-
-    # Install only necessary modules
-    Install-Module -Name Microsoft.Graph.Authentication,Microsoft.Graph.Applications,Microsoft.Graph.Identity.SignIns,Microsoft.Graph.Identity.DirectoryManagement,Microsoft.Graph.Reports -Scope CurrentUser -AllowClobber
-
-    # Or install the full umbrella module
-    Install-Module -Name Microsoft.Graph -Scope CurrentUser -AllowClobber
-
     #>
 
+[CmdletBinding()]
 param(
     [string]$OutputPath = "",
     [string]$TenantId = "",
@@ -91,17 +92,18 @@ param(
     [System.Security.SecureString]$AccessToken,
     # Service Principal / pipeline authentication
     [string]$ClientId = "",
-    [string]$ClientSecret = "",
     [string]$CertificateThumbprint = "",
     [switch]$UseManagedIdentity,
     [switch]$NonInteractive,
     # Filtering
     [switch]$OnlyWithPermissions,
+    [ValidateRange(0, [int]::MaxValue)]
     [int]$MinimumPermissions = 0,
+    [ValidateScript({ -not $_ -or (Test-Path $_ -PathType Leaf) })]
     [string]$RiskConfigPath = $null,
     [switch]$OnlyWithAppRegistrations,
     [switch]$OnlyServicePrincipals,
-    [switch]$Verbose
+    [switch]$DryRun
 )
 
 # Validate mutually exclusive parameters
@@ -109,10 +111,20 @@ if ($OnlyWithAppRegistrations -and $OnlyServicePrincipals) {
     Write-Error "-OnlyWithAppRegistrations and -OnlyServicePrincipals are mutually exclusive. Use one or the other."
     exit 1
 }
-if (($ClientId -or $ClientSecret -or $CertificateThumbprint) -and -not $TenantId) {
-    Write-Error "-TenantId is required when using Service Principal authentication (-ClientId/-ClientSecret/-CertificateThumbprint)."
+if (($ClientId -or $CertificateThumbprint) -and -not $TenantId) {
+    Write-Error "-TenantId is required when using Service Principal authentication (-ClientId/-CertificateThumbprint)."
     exit 1
 }
+
+# Make all unhandled errors terminating so they propagate through the try/catch/finally structure
+$ErrorActionPreference = 'Stop'
+
+# Microsoft first-party tenant IDs — used to classify Microsoft-owned apps
+$script:MicrosoftTenantIds = @(
+    'f8cdef31-a31e-4b4a-93e4-5f571e91255a',  # Microsoft Services
+    '72f988bf-86f1-41af-91ab-2d7cd011db47',  # Microsoft
+    'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'   # Microsoft Azure
+)
 
 # Risk scoring configuration
 $riskConfig = @{
@@ -149,32 +161,79 @@ $riskConfig = @{
 # Load external risk configuration if provided
 if ($RiskConfigPath -and (Test-Path $RiskConfigPath)) {
     try {
-        $externalConfig = Get-Content $RiskConfigPath | ConvertFrom-Json
-        $riskConfig = $externalConfig
-        Write-Host "Loaded external risk configuration from $RiskConfigPath" -ForegroundColor Green
+        $externalConfig = Get-Content $RiskConfigPath -Encoding UTF8 | ConvertFrom-Json
+        $requiredKeys = @('HighRiskPermissions', 'MediumRiskPermissions', 'HighRiskDirectoryRoles', 'SuspiciousKeywords')
+        $missingKeys = $requiredKeys | Where-Object { $externalConfig.PSObject.Properties.Name -notcontains $_ }
+        if ($missingKeys) {
+            Write-Warning "External risk config is missing required keys: $($missingKeys -join ', '). Using default settings."
+        } else {
+            $riskConfig = $externalConfig
+            Write-Host "Loaded external risk configuration from $RiskConfigPath" -ForegroundColor Green
+        }
     }
     catch {
-        Write-Warning "Failed to load external risk configuration. Using default settings."
+        Write-Warning "Failed to load external risk configuration: $($_.Exception.Message). Using default settings."
     }
 }
 
 # Function to safely import modules
 function Import-GraphModuleSafely {
     param([string]$ModuleName)
-    
+
+    # Reuse an already-loaded module if it meets the minimum version requirement
+    $loaded = Get-Module -Name $ModuleName
+    if ($loaded) {
+        if ($loaded.Version -ge [version]'2.0.0') {
+            Write-Verbose "$ModuleName $($loaded.Version) already loaded — skipping re-import"
+            return
+        }
+        Write-Warning "$ModuleName $($loaded.Version) is loaded but v2.0.0+ is required — re-importing"
+    }
+
     try {
-        Import-Module $ModuleName -Force -ErrorAction Stop
+        Import-Module $ModuleName -MinimumVersion '2.0.0' -ErrorAction Stop
         Write-Host "Successfully imported $ModuleName" -ForegroundColor Green
     }
     catch {
-        Write-Warning "Could not import $ModuleName. Attempting to use Microsoft.Graph umbrella module..."
+        Write-Warning "Could not import $ModuleName v2+. Attempting Microsoft.Graph umbrella module..."
         try {
-            Import-Module Microsoft.Graph -Force -ErrorAction Stop
+            $umbrella = Get-Module -Name 'Microsoft.Graph'
+            if (-not $umbrella -or $umbrella.Version -lt [version]'2.0.0') {
+                Import-Module Microsoft.Graph -MinimumVersion '2.0.0' -ErrorAction Stop
+            }
         }
         catch {
-            Write-Error "Failed to import required Graph modules. Please ensure Microsoft Graph PowerShell is properly installed."
-            Write-Host "Install with: Install-Module Microsoft.Graph -Scope CurrentUser" -ForegroundColor Yellow
+            Write-Error "Failed to import required Graph modules (v2.0.0+).`nRun: Install-Module Microsoft.Graph -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber"
             exit 1
+        }
+    }
+}
+
+# Retry wrapper for Graph API calls that may be throttled (HTTP 429).
+# Reads the Retry-After response header when available; falls back to exponential back-off.
+function Invoke-MgWithRetry {
+    param(
+        [scriptblock]$ScriptBlock,
+        [int]$MaxRetries = 3
+    )
+    $attempt = 0
+    while ($true) {
+        try {
+            return (& $ScriptBlock)
+        }
+        catch {
+            $attempt++
+            $statusCode = $null
+            try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
+            if ($statusCode -eq 429 -and $attempt -le $MaxRetries) {
+                $retryAfter = $null
+                try { $retryAfter = [int]$_.Exception.Response.Headers['Retry-After'] } catch {}
+                $delay = if ($retryAfter -gt 0) { $retryAfter } else { [Math]::Pow(2, $attempt) * 2 }
+                Write-Warning "Graph API throttled (429). Retrying in $delay s (attempt $attempt/$MaxRetries)..."
+                Start-Sleep -Seconds $delay
+            } else {
+                throw
+            }
         }
     }
 }
@@ -202,123 +261,75 @@ function Get-ServicePrincipalOwners {
         HasAnyOwners = $false
     }
     
-    # Get Service Principal owners
-    try {
-        $spOwners = Get-MgServicePrincipalOwner -ServicePrincipalId $ServicePrincipalId -All -ErrorAction SilentlyContinue
-        $spOwnerDetails = @()
-        
-        foreach ($owner in $spOwners) {
-            try {
-                # Try to get user details first
-                $user = Get-MgUser -UserId $owner.Id -ErrorAction SilentlyContinue
-                if ($user) {
-                    $spOwnerDetails += @{
-                        Id = $owner.Id
-                        DisplayName = $user.DisplayName
-                        UserPrincipalName = $user.UserPrincipalName
-                        Type = "User"
-                        Source = "ServicePrincipal"
-                    }
-                } else {
-                    # Try service principal if not a user
-                    $sp = Get-MgServicePrincipal -ServicePrincipalId $owner.Id -ErrorAction SilentlyContinue
-                    if ($sp) {
-                        $spOwnerDetails += @{
-                            Id = $owner.Id
-                            DisplayName = $sp.DisplayName
-                            UserPrincipalName = $sp.AppId
-                            Type = "ServicePrincipal"
-                            Source = "ServicePrincipal"
-                        }
-                    } else {
-                        # Fallback for unknown owner type
-                        $spOwnerDetails += @{
-                            Id = $owner.Id
-                            DisplayName = "Unknown"
-                            UserPrincipalName = ""
-                            Type = "Unknown"
-                            Source = "ServicePrincipal"
-                        }
-                    }
+    # Resolve a raw owner DirectoryObject (returned by Graph) into a typed hashtable.
+    # Uses @odata.type from AdditionalProperties — no extra API calls per owner.
+    function Resolve-OwnerObject {
+        param($Owner, [string]$Source)
+        $odataType   = $Owner.AdditionalProperties['@odata.type']
+        $displayName = $Owner.AdditionalProperties['displayName']
+        if (-not $displayName) { $displayName = 'Unknown' }
+        switch ($odataType) {
+            '#microsoft.graph.user' {
+                return @{
+                    Id = $Owner.Id
+                    DisplayName = $displayName
+                    UserPrincipalName = $Owner.AdditionalProperties['userPrincipalName']
+                    Type = 'User'
+                    Source = $Source
                 }
             }
-            catch {
-                $spOwnerDetails += @{
-                    Id = $owner.Id
-                    DisplayName = "Unknown"
-                    UserPrincipalName = ""
-                    Type = "Unknown"
-                    Source = "ServicePrincipal"
+            '#microsoft.graph.servicePrincipal' {
+                return @{
+                    Id = $Owner.Id
+                    DisplayName = $displayName
+                    UserPrincipalName = $Owner.AdditionalProperties['appId']
+                    Type = 'ServicePrincipal'
+                    Source = $Source
+                }
+            }
+            default {
+                return @{
+                    Id = $Owner.Id
+                    DisplayName = $displayName
+                    UserPrincipalName = ''
+                    Type = 'Unknown'
+                    Source = $Source
                 }
             }
         }
-        
+    }
+
+    # Get Service Principal owners — request display fields so no per-owner API call is needed
+    try {
+        $spOwners = Get-MgServicePrincipalOwner -ServicePrincipalId $ServicePrincipalId -All `
+            -Property 'id,displayName,userPrincipalName,appId' -ErrorAction SilentlyContinue
+        $spOwnerDetails = @()
+        foreach ($owner in $spOwners) {
+            $spOwnerDetails += Resolve-OwnerObject -Owner $owner -Source 'ServicePrincipal'
+        }
         $allOwners.ServicePrincipalOwners = $spOwnerDetails
         $allOwners.HasServicePrincipalOwners = $spOwnerDetails.Count -gt 0
     }
     catch {
-        # Service Principal owners retrieval failed
+        Write-Verbose "Could not retrieve Service Principal owners for '$ServicePrincipalId': $($_.Exception.Message)"
     }
-    
-    # Get App Registration owners (if app registration exists)
+
+    # Get App Registration owners (if an App Registration exists in this tenant)
     try {
-        $app = Get-MgApplication -Filter "appId eq '$AppId'" -ErrorAction SilentlyContinue
+        $app = Get-MgApplication -Filter "appId eq '$AppId'" -Property 'id' -ErrorAction SilentlyContinue
         if ($app) {
-            $appOwners = Get-MgApplicationOwner -ApplicationId $app.Id -All -ErrorAction SilentlyContinue
+            $appOwners = Get-MgApplicationOwner -ApplicationId $app.Id -All `
+                -Property 'id,displayName,userPrincipalName,appId' -ErrorAction SilentlyContinue
             $appOwnerDetails = @()
-            
             foreach ($owner in $appOwners) {
-                try {
-                    # Try to get user details first
-                    $user = Get-MgUser -UserId $owner.Id -ErrorAction SilentlyContinue
-                    if ($user) {
-                        $appOwnerDetails += @{
-                            Id = $owner.Id
-                            DisplayName = $user.DisplayName
-                            UserPrincipalName = $user.UserPrincipalName
-                            Type = "User"
-                            Source = "AppRegistration"
-                        }
-                    } else {
-                        # Try service principal if not a user
-                        $sp = Get-MgServicePrincipal -ServicePrincipalId $owner.Id -ErrorAction SilentlyContinue
-                        if ($sp) {
-                            $appOwnerDetails += @{
-                                Id = $owner.Id
-                                DisplayName = $sp.DisplayName
-                                UserPrincipalName = $sp.AppId
-                                Type = "ServicePrincipal"
-                                Source = "AppRegistration"
-                            }
-                        } else {
-                            # Fallback for unknown owner type
-                            $appOwnerDetails += @{
-                                Id = $owner.Id
-                                DisplayName = "Unknown"
-                                UserPrincipalName = ""
-                                Type = "Unknown"
-                                Source = "AppRegistration"
-                            }
-                        }
-                    }
-                }
-                catch {
-                    $appOwnerDetails += @{
-                        Id = $owner.Id
-                        DisplayName = "Unknown"
-                        UserPrincipalName = ""
-                        Type = "Unknown"
-                        Source = "AppRegistration"
-                    }
-                }
+                $appOwnerDetails += Resolve-OwnerObject -Owner $owner -Source 'AppRegistration'
             }
-            
             $allOwners.AppRegistrationOwners = $appOwnerDetails
             $allOwners.HasAppRegistrationOwners = $appOwnerDetails.Count -gt 0
         }
     }
     catch {
-        # App Registration owners retrieval failed
+        Write-Verbose "Could not retrieve App Registration owners for AppId '$AppId': $($_.Exception.Message)"
     }
     
     # Combine unique owners from both sources
@@ -369,7 +380,8 @@ function Get-RiskScore {
         [bool]$IsMicrosoftApp,
         [bool]$UsesPasswordSecrets,
         [int]$SecretCount,
-        [bool]$HasLongLivedCredentials
+        [bool]$HasLongLivedCredentials,
+        [bool]$IsEnabled = $true
     )
     
     $score = 0
@@ -500,9 +512,23 @@ function Get-RiskScore {
         $riskFactors += "External application registered in another tenant"
     }
 
+    # Disabled apps retain their full raw score for awareness but are de-prioritised
+    # by a 0.3 multiplier — they cannot be exploited while disabled so should not
+    # dominate the report over active apps with the same permission set.
+    if (-not $IsEnabled) {
+        $score = [int][Math]::Ceiling($score * 0.3)
+        $riskFactors += "App is disabled — score reduced to reflect lower active risk"
+    }
+
+    # Score thresholds:
+    #   Low < 10 ≤ Medium < 20 ≤ High < 30 ≤ Critical
+    # Calibration reference points:
+    #   Single high-risk permission (10) → Medium
+    #   High-risk perm + app-type bonus + no owners (10+5+5) → High
+    #   Two high-risk perms + high-risk directory role (10+10+15) → Critical
     return @{
-        Score = $score
-        Level = if ($score -ge 30) { "Critical" } elseif ($score -ge 20) { "High" } elseif ($score -ge 10) { "Medium" } else { "Low" }
+        Score  = $score
+        Level  = if ($score -ge 30) { "Critical" } elseif ($score -ge 20) { "High" } elseif ($score -ge 10) { "Medium" } else { "Low" }
         Factors = $riskFactors
     }
 }
@@ -542,7 +568,9 @@ function Get-ApplicationCredentials {
             })
         }
     }
-    catch { }
+    catch {
+        Write-Verbose "Could not retrieve App Registration credentials for AppId '$AppId': $($_.Exception.Message)"
+    }
 
     $totalActiveSecrets = $spActiveSecrets.Count + $appActiveSecrets.Count
     $totalActiveCerts   = $spActiveCerts.Count + $appActiveCerts.Count
@@ -571,10 +599,10 @@ function Get-ServicePrincipalPermissions {
     param($ServicePrincipal)
     
     # Get delegated permissions
-    $delegatedGrants = Get-MgOauth2PermissionGrant -Filter "clientId eq '$($ServicePrincipal.Id)'" -All
-    
+    $delegatedGrants = Invoke-MgWithRetry { Get-MgOauth2PermissionGrant -Filter "clientId eq '$($ServicePrincipal.Id)'" -All }
+
     # Get application permissions
-    $appRoleAssignments = Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $ServicePrincipal.Id -All
+    $appRoleAssignments = Invoke-MgWithRetry { Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $ServicePrincipal.Id -All }
     
     # Get directory role assignments
     $roleAssignments = @()
@@ -630,7 +658,9 @@ function Get-ServicePrincipalPermissions {
 
 # Import required modules
 Write-Host "Importing Microsoft Graph modules..." -ForegroundColor Green
+Import-GraphModuleSafely "Microsoft.Graph.Authentication"
 Import-GraphModuleSafely "Microsoft.Graph.Applications"
+Import-GraphModuleSafely "Microsoft.Graph.Identity.SignIns"
 Import-GraphModuleSafely "Microsoft.Graph.Identity.DirectoryManagement"
 Import-GraphModuleSafely "Microsoft.Graph.Users"
 
@@ -643,39 +673,47 @@ $scopes = @(
 )
 
 Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Green
-if ($AccessToken) {
-    # Token passed in — e.g. from AzurePowerShell@5 azureSubscription task
-    Write-Host "  Auth method: Pre-acquired access token" -ForegroundColor Cyan
-    Connect-MgGraph -AccessToken $AccessToken -NoWelcome
-} elseif ($ClientId -and $CertificateThumbprint) {
-    # Service Principal with certificate — recommended for pipelines
-    Write-Host "  Auth method: Service Principal (certificate)" -ForegroundColor Cyan
-    Connect-MgGraph -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -NoWelcome
-} elseif ($ClientId -and $ClientSecret) {
-    # Service Principal with client secret
-    Write-Host "  Auth method: Service Principal (client secret)" -ForegroundColor Cyan
-    $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-    $spCredential = New-Object System.Management.Automation.PSCredential($ClientId, $secureSecret)
-    Connect-MgGraph -TenantId $TenantId -ClientSecretCredential $spCredential -NoWelcome
-} elseif ($UseManagedIdentity) {
-    # Managed Identity — for Azure DevOps / Azure-hosted agents
-    Write-Host "  Auth method: Managed Identity" -ForegroundColor Cyan
-    Connect-MgGraph -Identity -NoWelcome
-} elseif ($TenantId) {
-    Connect-MgGraph -Scopes $scopes -TenantId $TenantId -NoWelcome
-} else {
-    Connect-MgGraph -Scopes $scopes -NoWelcome
+try {
+    if ($AccessToken) {
+        # Token passed in — e.g. from AzurePowerShell@5 azureSubscription task
+        Write-Host "  Auth method: Pre-acquired access token" -ForegroundColor Cyan
+        Connect-MgGraph -AccessToken $AccessToken -NoWelcome -ErrorAction Stop
+    } elseif ($ClientId -and $CertificateThumbprint) {
+        # Service Principal with certificate — recommended for pipelines
+        Write-Host "  Auth method: Service Principal (certificate)" -ForegroundColor Cyan
+        Connect-MgGraph -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+    } elseif ($UseManagedIdentity) {
+        # Managed Identity — for Azure DevOps / Azure-hosted agents
+        Write-Host "  Auth method: Managed Identity" -ForegroundColor Cyan
+        Connect-MgGraph -Identity -NoWelcome -ErrorAction Stop
+    } elseif ($TenantId) {
+        Connect-MgGraph -Scopes $scopes -TenantId $TenantId -NoWelcome -ErrorAction Stop
+    } else {
+        Connect-MgGraph -Scopes $scopes -NoWelcome -ErrorAction Stop
+    }
+    if (-not (Get-MgContext)) {
+        throw 'Connect-MgGraph returned no context — authentication may have been cancelled or denied.'
+    }
 }
+catch {
+    Write-Error "Authentication failed: $($_.Exception.Message)"
+    exit 1
+}
+
+try {
 
 Write-Host "Gathering Enterprise Applications..." -ForegroundColor Green
 
+# Cache once — avoids repeated Get-MgContext calls inside loops
+$currentTenantId = (Get-MgContext).TenantId
+
 # Get service principals that match the Entra ID portal "Enterprise Applications" filter
 $servicePrincipals = Get-MgServicePrincipal -All -Property @(
-    "Id", "AppId", "DisplayName", "AppOwnerOrganizationId", 
-    "ServicePrincipalType", "AppRoles", "Oauth2PermissionScopes", "SignInAudience", 
+    "Id", "AppId", "DisplayName", "AppOwnerOrganizationId",
+    "ServicePrincipalType", "AppRoles", "Oauth2PermissionScopes", "SignInAudience",
     "Tags", "AppDisplayName", "CreatedDateTime", "Owners", "AppRoleAssignmentRequired", "AccountEnabled",
     "PasswordCredentials", "KeyCredentials"
-) | Where-Object { 
+) | Where-Object {
     $_.ServicePrincipalType -eq "Application" -and
     #$_.AppOwnerOrganizationId -ne "f8cdef31-a31e-4b4a-93e4-5f571e91255a" -and
     $_.AppId -notin @(
@@ -690,31 +728,36 @@ $servicePrincipals = Get-MgServicePrincipal -All -Property @(
         "797f4846-ba00-4fd7-ba43-dac1f8f63013" # Windows Azure Service Management API
     ) -and
     ($_.Tags -contains "WindowsAzureActiveDirectoryIntegratedApp" -or
-     $_.AppOwnerOrganizationId -eq (Get-MgContext).TenantId -or
+     $_.AppOwnerOrganizationId -eq $currentTenantId -or
      $_.SignInAudience -in @("AzureADMyOrg", "AzureADMultipleOrgs", "AzureADandPersonalMicrosoftAccount"))
 }
 
 Write-Host "Found $($servicePrincipals.Count) Enterprise Applications" -ForegroundColor Green
 
+# Caches populated during pre-filtering and reused in the main processing loop
+$credentialCache  = @{}
+$permissionCache  = @{}
+
 # PRE-FILTERING PHASE: Apply quick filters first for performance optimization
 if ($OnlyWithPermissions -or $MinimumPermissions -gt 0 -or $OnlyWithAppRegistrations -or $OnlyServicePrincipals) {
     Write-Host "`nPre-filtering applications for performance optimization..." -ForegroundColor Cyan
-    
+
     $filteredServicePrincipals = @()
     $filteringProgress = 0
-    
+
     foreach ($sp in $servicePrincipals) {
         $filteringProgress++
         if ($filteringProgress % 10 -eq 0) {
             Write-Progress -Activity "Pre-filtering applications" -Status "Processing $($sp.DisplayName)" -PercentComplete (($filteringProgress / $servicePrincipals.Count) * 100)
         }
-        
+
         $shouldInclude = $true
-        
-        # Check App Registration filter first (fastest check)
+
+        # Check App Registration filter first (fastest check); cache result for main loop
         if ($OnlyWithAppRegistrations -or $OnlyServicePrincipals) {
-            $credentials = Get-ApplicationCredentials -AppId $sp.AppId
-            
+            $credentials = Get-ApplicationCredentials -AppId $sp.AppId -ServicePrincipal $sp
+            $credentialCache[$sp.Id] = $credentials
+
             if ($OnlyWithAppRegistrations -and -not $credentials.HasAppRegistration) {
                 $shouldInclude = $false
             }
@@ -722,11 +765,12 @@ if ($OnlyWithPermissions -or $MinimumPermissions -gt 0 -or $OnlyWithAppRegistrat
                 $shouldInclude = $false
             }
         }
-        
-        # Check permissions filter (more expensive check)
+
+        # Check permissions filter (more expensive); cache result for main loop
         if ($shouldInclude -and ($OnlyWithPermissions -or $MinimumPermissions -gt 0)) {
             $permissionInfo = Get-ServicePrincipalPermissions -ServicePrincipal $sp
-            
+            $permissionCache[$sp.Id] = $permissionInfo
+
             if ($OnlyWithPermissions -and $permissionInfo.TotalPermissions -eq 0) {
                 $shouldInclude = $false
             }
@@ -734,16 +778,16 @@ if ($OnlyWithPermissions -or $MinimumPermissions -gt 0 -or $OnlyWithAppRegistrat
                 $shouldInclude = $false
             }
         }
-        
+
         if ($shouldInclude) {
             $filteredServicePrincipals += $sp
         }
     }
-    
+
     Write-Progress -Activity "Pre-filtering applications" -Completed
     Write-Host "Pre-filtering complete: $($filteredServicePrincipals.Count) applications match criteria" -ForegroundColor Green
     Write-Host "Performance gain: Skipping detailed analysis for $($servicePrincipals.Count - $filteredServicePrincipals.Count) applications" -ForegroundColor Yellow
-    
+
     $servicePrincipals = $filteredServicePrincipals
 }
 
@@ -753,7 +797,7 @@ if (-not $NonInteractive) {
     $confirmation = Read-Host "Continue with detailed analysis of $($servicePrincipals.Count) applications? (Y/N)"
     if ($confirmation -notmatch '^[Yy]') {
         Write-Host "Operation cancelled by user." -ForegroundColor Yellow
-        Disconnect-MgGraph -ErrorAction SilentlyContinue
+        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
         exit 0
     }
 } else {
@@ -762,27 +806,34 @@ if (-not $NonInteractive) {
 
 Write-Host "`nProceeding with analysis..." -ForegroundColor Green
 
+# Cache resource Service Principals to avoid redundant Graph calls across apps
+$resourceSpCache = @{}
+
 $report = @()
 $processedCount = 0
 
 foreach ($sp in $servicePrincipals) {
     $processedCount++
     Write-Progress -Activity "Processing applications" -Status "Processing $($sp.DisplayName)" -PercentComplete (($processedCount / $servicePrincipals.Count) * 100)
-    Write-Host "Processing: $($sp.DisplayName) ($processedCount/$($servicePrincipals.Count))" -ForegroundColor Yellow
-    
-    # Get permissions (reuse from pre-filtering if available, otherwise get fresh)
-    $permissionInfo = Get-ServicePrincipalPermissions -ServicePrincipal $sp
-    
+    Write-Verbose "Processing: $($sp.DisplayName) ($processedCount/$($servicePrincipals.Count))"
+
+    # Reuse pre-filtering result if available; otherwise fetch now
+    $permissionInfo = if ($permissionCache.ContainsKey($sp.Id)) {
+        $permissionCache[$sp.Id]
+    } else {
+        Get-ServicePrincipalPermissions -ServicePrincipal $sp
+    }
+
     # Process permissions into detailed format
     $permissions = @()
     $adminConsentCount = 0
     $userConsentCount = 0
     $totalUsers = 0
-    
+
     # Process delegated permissions
     foreach ($grant in $permissionInfo.DelegatedGrants) {
         $consentType = if ($grant.ConsentType -eq "AllPrincipals") { "Admin Consent" } else { "User Consent" }
-        
+
         if ($grant.ConsentType -eq "AllPrincipals") {
             $adminConsentCount++
             $userCount = "All Users"
@@ -791,13 +842,16 @@ foreach ($sp in $servicePrincipals) {
             $userCount = if ($grant.PrincipalId) { 1 } else { 0 }
             $totalUsers += $userCount
         }
-        
-        $resourceSP = Get-MgServicePrincipal -ServicePrincipalId $grant.ResourceId -ErrorAction SilentlyContinue
+
+        if (-not $resourceSpCache.ContainsKey($grant.ResourceId)) {
+            $resourceSpCache[$grant.ResourceId] = Invoke-MgWithRetry { Get-MgServicePrincipal -ServicePrincipalId $grant.ResourceId -ErrorAction SilentlyContinue }
+        }
+        $resourceSP = $resourceSpCache[$grant.ResourceId]
         $resourceName = if ($resourceSP) { $resourceSP.DisplayName } else { "Unknown" }
-        
+
         if ($grant.Scope) {
-            $scopes = $grant.Scope.Split(' ') | Where-Object { $_ -ne '' }
-            foreach ($scope in $scopes) {
+            $scopeTokens = $grant.Scope.Split(' ') | Where-Object { $_ -ne '' }
+            foreach ($scope in $scopeTokens) {
                 $permissions += [PSCustomObject]@{
                     Type = "Delegated"
                     Permission = $scope
@@ -808,15 +862,18 @@ foreach ($sp in $servicePrincipals) {
             }
         }
     }
-    
+
     # Process application permissions
     foreach ($assignment in $permissionInfo.AppRoleAssignments) {
-        $resourceSP = Get-MgServicePrincipal -ServicePrincipalId $assignment.ResourceId -ErrorAction SilentlyContinue
+        if (-not $resourceSpCache.ContainsKey($assignment.ResourceId)) {
+            $resourceSpCache[$assignment.ResourceId] = Invoke-MgWithRetry { Get-MgServicePrincipal -ServicePrincipalId $assignment.ResourceId -ErrorAction SilentlyContinue }
+        }
+        $resourceSP = $resourceSpCache[$assignment.ResourceId]
         $resourceName = if ($resourceSP) { $resourceSP.DisplayName } else { "Unknown" }
-        
+
         $appRole = $resourceSP.AppRoles | Where-Object { $_.Id -eq $assignment.AppRoleId }
         $permissionName = if ($appRole) { $appRole.Value } else { "Unknown Permission" }
-        
+
         $permissions += [PSCustomObject]@{
             Type = "Application"
             Permission = $permissionName
@@ -826,7 +883,7 @@ foreach ($sp in $servicePrincipals) {
         }
         $adminConsentCount++
     }
-    
+
     # Process directory role assignments
     foreach ($role in $permissionInfo.RoleAssignments) {
         $permissions += [PSCustomObject]@{
@@ -837,9 +894,13 @@ foreach ($sp in $servicePrincipals) {
             UserCount = "N/A"
         }
     }
-    
-    # Get application credentials (App Registration + Service Principal own credentials)
-    $credentials = Get-ApplicationCredentials -AppId $sp.AppId -ServicePrincipal $sp
+
+    # Reuse pre-filtering credential result if available; otherwise fetch now
+    $credentials = if ($credentialCache.ContainsKey($sp.Id)) {
+        $credentialCache[$sp.Id]
+    } else {
+        Get-ApplicationCredentials -AppId $sp.AppId -ServicePrincipal $sp
+    }
     
     # Calculate total users affected
     $totalUsersAffected = if ($permissionInfo.DelegatedGrants | Where-Object { $_.ConsentType -eq "AllPrincipals" }) { 
@@ -855,8 +916,8 @@ foreach ($sp in $servicePrincipals) {
     $isEnabled = $sp.AccountEnabled
     
     # Calculate if it's an internal app
-    $isInternalApp = $sp.AppOwnerOrganizationId -eq (Get-MgContext).TenantId
-    $isMicrosoftApp = $sp.AppOwnerOrganizationId -in @('f8cdef31-a31e-4b4a-93e4-5f571e91255a', '72f988bf-86f1-41af-91ab-2d7cd011db47', 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2')
+    $isInternalApp = $sp.AppOwnerOrganizationId -eq $currentTenantId
+    $isMicrosoftApp = $sp.AppOwnerOrganizationId -in $script:MicrosoftTenantIds
 
     # Calculate risk score with enhanced ownership parameters
     $riskAssessment = Get-RiskScore `
@@ -874,7 +935,8 @@ foreach ($sp in $servicePrincipals) {
         -IsMicrosoftApp $isMicrosoftApp `
         -UsesPasswordSecrets $credentials.UsesPasswordSecrets `
         -SecretCount $credentials.SecretCount `
-        -HasLongLivedCredentials $credentials.HasLongLivedCredentials
+        -HasLongLivedCredentials $credentials.HasLongLivedCredentials `
+        -IsEnabled $isEnabled
     $report += [PSCustomObject]@{
         DisplayName = $sp.DisplayName
         AppId = $sp.AppId
@@ -964,7 +1026,9 @@ $appsWithApplicationPerms = @($report | Where-Object { $_.ApplicationPermissions
 $appsWithDelegatedPerms = @($report | Where-Object { $_.DelegatedPermissions -gt 0 }).Count
 $totalApplicationPerms = [int]($report | Measure-Object -Property ApplicationPermissions -Sum).Sum
 $totalDelegatedPerms = [int]($report | Measure-Object -Property DelegatedPermissions -Sum).Sum
-$appsWithoutCredentials = @($report | Where-Object { $_.HasActiveCredentials -eq $false -and $_.HasAppRegistration -eq $true }).Count
+$appsWithoutCredentials  = @($report | Where-Object { $_.HasActiveCredentials -eq $false -and $_.HasAppRegistration -eq $true }).Count
+$appsWithActiveCredentials = @($report | Where-Object { $_.HasActiveCredentials -eq $true }).Count
+$appsWithExpiringCredentials = @($report | Where-Object { $_.ExpiringCredentials -gt 0 }).Count
 
 # Get tenant information
 $tenantInfo = Get-MgOrganization | Select-Object -First 1
@@ -983,10 +1047,21 @@ if ($outputDir -and -not (Test-Path $outputDir)) {
     Write-Host "Created output directory: $outputDir" -ForegroundColor Cyan
 }
 
+# Verify the output path is writable before spending time on HTML generation
+$_writeTestDir  = if ($outputDir) { $outputDir } else { '.' }
+$_writeTestFile = Join-Path $_writeTestDir ([System.IO.Path]::GetRandomFileName())
+try {
+    [System.IO.File]::WriteAllText($_writeTestFile, '')
+    Remove-Item $_writeTestFile -Force -ErrorAction SilentlyContinue
+} catch {
+    Write-Error "Output path '$OutputPath' is not writable: $($_.Exception.Message)"
+    exit 1
+}
+
 # Calculate additional statistics for internal vs external apps and ownership
 $internalApps   = @($report | Where-Object { $_.AppOwnerOrganizationId -eq $tenantId }).Count
-$microsoftApps  = @($report | Where-Object { $_.AppOwnerOrganizationId -in @('f8cdef31-a31e-4b4a-93e4-5f571e91255a','72f988bf-86f1-41af-91ab-2d7cd011db47','cdc5aeea-15c5-4db6-b079-fcadd2505dc2') }).Count
-$externalApps   = @($report | Where-Object { $_.AppOwnerOrganizationId -ne $tenantId -and $_.AppOwnerOrganizationId -notin @('f8cdef31-a31e-4b4a-93e4-5f571e91255a','72f988bf-86f1-41af-91ab-2d7cd011db47','cdc5aeea-15c5-4db6-b079-fcadd2505dc2') }).Count
+$microsoftApps  = @($report | Where-Object { $_.AppOwnerOrganizationId -in $script:MicrosoftTenantIds }).Count
+$externalApps   = @($report | Where-Object { $_.AppOwnerOrganizationId -ne $tenantId -and $_.AppOwnerOrganizationId -notin $script:MicrosoftTenantIds }).Count
 $appsWithoutOwners = @($report | Where-Object { $_.HasOwners -eq $false }).Count
 $appsWithOpenAccess = @($report | Where-Object { $_.AssignmentRequired -eq $false }).Count
 $appsWithOwnershipGaps = @($report | Where-Object { $_.OwnershipGap -eq $true }).Count
@@ -1230,6 +1305,14 @@ $html = @"
         .filter-toggle-btn:hover { border-color: var(--blue); background: var(--blue-xs); }
         .filter-toggle-btn[aria-expanded="true"] { border-color: var(--blue); }
         .filter-toggle-btn .caret { font-size: 10px; color: var(--gray); transition: transform 0.15s; }
+        .export-csv-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 14px; border-radius: 6px; border: 2px solid var(--blue);
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            cursor: pointer; background: transparent; color: var(--blue);
+            transition: background 0.15s; margin-left: auto;
+        }
+        .export-csv-btn:hover { background: var(--blue-xs); }
         .filter-summary { font-size: 13px; font-weight: 600; color: var(--blue); }
 
         .clickable-badge { cursor: pointer; transition: filter 0.15s, box-shadow 0.15s; }
@@ -1311,6 +1394,8 @@ $html = @"
             text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px;
         }
         th:hover { background: var(--blue-xs); }
+        th.sort-asc::after  { content: ' ▲'; font-size: 0.8em; opacity: 0.7; }
+        th.sort-desc::after { content: ' ▼'; font-size: 0.8em; opacity: 0.7; }
         tbody tr { transition: background 0.12s; }
         tbody tr:hover { background: var(--bg-subtle); }
 
@@ -1401,7 +1486,7 @@ $html = @"
             <h1>Microsoft Entra ID Service Principals (Enterprise Applications) Report</h1>
             <div class="meta">
                 <strong>Tenant:</strong> $(ConvertTo-HtmlSafe $tenantName) &nbsp;&middot;&nbsp;
-                <strong>Tenant ID:</strong> $tenantId &nbsp;&middot;&nbsp;
+                <strong>Tenant ID:</strong> $(ConvertTo-HtmlSafe $tenantId) &nbsp;&middot;&nbsp;
                 <strong>Generated:</strong> $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
             </div>
         </div>
@@ -1472,6 +1557,7 @@ $html = @"
         <button id="filterToggle" class="filter-toggle-btn" onclick="toggleFilterPanel()" aria-expanded="false">
             <span class="caret">&#9656;</span> Search &amp; Filter
         </button>
+        <button class="export-csv-btn" onclick="exportCsv()" title="Download visible rows as CSV">&#8595; Export CSV</button>
         <span id="filterSummary" class="filter-summary"></span>
     </div>
 
@@ -1567,7 +1653,7 @@ foreach ($app in $sortedReport) {
     
     # Determine app ownership
     $isInternal = $app.AppOwnerOrganizationId -eq $tenantId
-    $isMicrosoft = $app.AppOwnerOrganizationId -in @('f8cdef31-a31e-4b4a-93e4-5f571e91255a', '72f988bf-86f1-41af-91ab-2d7cd011db47', 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2')
+    $isMicrosoft = $app.AppOwnerOrganizationId -in $script:MicrosoftTenantIds
     $ownershipType = if ($isInternal) { "internal" } elseif ($isMicrosoft) { "microsoft" } else { "third-party" }
     $ownershipText = switch ($ownershipType) {
         "internal"    { "<span class='badge green clickable-badge' data-fg='ownership' data-fv='internal' title='App registered in this tenant and owned by your organization'>Internal</span>" }
@@ -1627,17 +1713,19 @@ foreach ($app in $sortedReport) {
             "Delegated"      { "delegated-permission" }
             "Directory Role" { "directory-role" }
         }
+        $safePermName = ConvertTo-HtmlSafe $perm.Permission
+        $safeResource = ConvertTo-HtmlSafe $perm.Resource
         if ($perm.Type -ne "Directory Role") {
-            $permLink = "<a href='https://graphpermissions.merill.net/permission/$($perm.Permission)' target='_blank' title='View $($perm.Permission) on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$($perm.Permission)</a>"
+            $permLink = "<a href='https://graphpermissions.merill.net/permission/$safePermName' target='_blank' title='View $safePermName on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
         } else {
-            $permLink = $perm.Permission
+            $permLink = $safePermName
         }
-        $permissionDetails += "<div class='permission-item $permClass'><strong>[$($perm.Type)]</strong> $permLink on <em>$($perm.Resource)</em></div>"
+        $permissionDetails += "<div class='permission-item $permClass'><strong>[$($perm.Type)]</strong> $permLink on <em>$safeResource</em></div>"
     }
-    
-    # Build risk factors - the array should already be deduplicated from Get-RiskScore function
+
+    # Build risk factors — escape each item as it may contain API-sourced permission/app names
     $riskFactorsHtml = if ($app.RiskFactors.Count -gt 0) {
-        $riskFactorItems = ($app.RiskFactors | ForEach-Object { "<li>$_</li>" }) -join ""
+        $riskFactorItems = ($app.RiskFactors | ForEach-Object { "<li>$(ConvertTo-HtmlSafe $_)</li>" }) -join ""
         "<ul style='margin:5px 0; padding-left: 20px;'>$riskFactorItems</ul>"
     } else {
         "No specific risk factors identified"
@@ -1852,25 +1940,66 @@ $html += @"
             });
         }
 
+        let _sortCol = -1, _sortAsc = true;
         function sortTable(columnIndex, type) {
+            if (_sortCol === columnIndex) {
+                _sortAsc = !_sortAsc;
+            } else {
+                _sortCol = columnIndex;
+                _sortAsc = type !== 'number';
+            }
+            const dir = _sortAsc ? 1 : -1;
             const table = document.getElementById('reportTable');
             const tbody = table.querySelector('tbody');
             const rows = Array.from(tbody.querySelectorAll('tr'));
-            
+
             rows.sort((a, b) => {
                 let aVal = a.cells[columnIndex].textContent.trim();
                 let bVal = b.cells[columnIndex].textContent.trim();
-                
                 if (type === 'number') {
                     aVal = parseInt(aVal.replace(/[^0-9]/g, '')) || 0;
                     bVal = parseInt(bVal.replace(/[^0-9]/g, '')) || 0;
-                    return bVal - aVal; // Descending for numbers
+                    return (aVal - bVal) * dir;
                 }
-                
-                return aVal.localeCompare(bVal);
+                return aVal.localeCompare(bVal) * dir;
             });
-            
+
             rows.forEach(row => tbody.appendChild(row));
+
+            document.querySelectorAll('#reportTable thead th').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+            });
+            document.querySelectorAll('#reportTable thead th')[columnIndex]
+                ?.classList.add(_sortAsc ? 'sort-asc' : 'sort-desc');
+        }
+
+        function exportCsv() {
+            const headers = Array.from(document.querySelectorAll('#reportTable thead th'))
+                .map(th => th.textContent.replace(/[▲▼]/g, '').trim());
+
+            const visibleRows = Array.from(document.querySelectorAll('#reportTable tbody tr'))
+                .filter(tr => tr.style.display !== 'none');
+
+            const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
+
+            const lines = [headers.map(esc).join(',')];
+            visibleRows.forEach(tr => {
+                const cells = Array.from(tr.cells).map(td =>
+                    esc(td.textContent.trim().replace(/\s+/g, ' '))
+                );
+                lines.push(cells.join(','));
+            });
+
+            // UTF-8 BOM ensures Excel opens the file with correct encoding
+            const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = 'EntraIDReport_' + new Date().toISOString().slice(0, 10) + '.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
         function toggleTheme() {
@@ -1919,15 +2048,18 @@ $html += @"
 </html>
 "@
 
-# Save the HTML report
-$html | Out-File -FilePath $OutputPath -Encoding UTF8
+# Save the HTML report — UTF-8 without BOM for consistent output across PS 5.1 and PS 7
+if ($DryRun) {
+    Write-Host "DryRun: skipping report write to '$OutputPath'" -ForegroundColor Yellow
+} else {
+    [System.IO.File]::WriteAllText($OutputPath, $html, [System.Text.UTF8Encoding]::new($false))
+    Write-Host "Report generated successfully: $OutputPath" -ForegroundColor Green
 
-Write-Host "Report generated successfully: $OutputPath" -ForegroundColor Green
-
-# Open the report in default browser (interactive mode only)
-if (-not $NonInteractive) {
-    Write-Host "Opening report in default browser..." -ForegroundColor Green
-    Start-Process $OutputPath
+    # Open the report in default browser (interactive mode only)
+    if (-not $NonInteractive) {
+        Write-Host "Opening report in default browser..." -ForegroundColor Green
+        Start-Process ([System.IO.Path]::GetFullPath($OutputPath))
+    }
 }
 
 # Display summary statistics in console
@@ -1943,15 +2075,15 @@ Write-Host "  - Apps with Delegated Permissions: $appsWithDelegatedPerms (Total:
 Write-Host "`nRisk Assessment:" -ForegroundColor White
 Write-Host "  - Critical Risk: $criticalRiskApps" -ForegroundColor Red
 Write-Host "  - High Risk: $highRiskApps" -ForegroundColor DarkYellow
-Write-Host "  - Medium Risk: $(($report | Where-Object { $_.RiskLevel -eq "Medium" }).Count)" -ForegroundColor Yellow
-Write-Host "  - Low Risk: $(($report | Where-Object { $_.RiskLevel -eq "Low" }).Count)" -ForegroundColor Green
+Write-Host "  - Medium Risk: $mediumRiskApps" -ForegroundColor Yellow
+Write-Host "  - Low Risk: $lowRiskApps" -ForegroundColor Green
 Write-Host "`nGovernance Analysis:" -ForegroundColor White
 Write-Host "  - Apps without owners: $appsWithoutOwners" -ForegroundColor Red
 Write-Host "  - Apps with open access (Assignment Required = No): $appsWithOpenAccess" -ForegroundColor DarkYellow
 Write-Host "`nCredential Analysis:" -ForegroundColor White
-Write-Host "  - Apps with active credentials: $(($report | Where-Object { $_.HasActiveCredentials -eq $true }).Count)" -ForegroundColor Green
+Write-Host "  - Apps with active credentials: $appsWithActiveCredentials" -ForegroundColor Green
 Write-Host "  - Apps without credentials: $appsWithoutCredentials" -ForegroundColor DarkYellow
-Write-Host "  - Apps with expiring credentials (30 days): $(($report | Where-Object { $_.ExpiringCredentials -gt 0 }).Count)" -ForegroundColor Yellow
+Write-Host "  - Apps with expiring credentials (30 days): $appsWithExpiringCredentials" -ForegroundColor Yellow
 
 # Performance summary
 if ($OnlyWithPermissions -or $MinimumPermissions -gt 0 -or $OnlyWithAppRegistrations -or $OnlyServicePrincipals) {
@@ -1960,9 +2092,13 @@ if ($OnlyWithPermissions -or $MinimumPermissions -gt 0 -or $OnlyWithAppRegistrat
     Write-Host "  - Analysis was only performed on filtered applications" -ForegroundColor Green
 }
 
-# Disconnect from Microsoft Graph
-Disconnect-MgGraph
+    Write-Host "`nScript completed successfully!" -ForegroundColor Green
+    Write-Host "Check the HTML report for detailed analysis focused on reliable data." -ForegroundColor Cyan
+    Write-Host "For usage verification, manually review sign-in logs in the Azure portal." -ForegroundColor Yellow
 
-Write-Host "`nScript completed successfully!" -ForegroundColor Green
-Write-Host "Check the HTML report for detailed analysis focused on reliable data." -ForegroundColor Cyan
-Write-Host "For usage verification, manually review sign-in logs in the Azure portal." -ForegroundColor Yellow
+} finally {
+    # Guaranteed to run even if the script throws — keeps Graph sessions clean
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+}
+
+exit 0
