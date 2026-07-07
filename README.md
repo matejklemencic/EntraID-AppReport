@@ -44,8 +44,8 @@ Most badges in the report table are clickable and open a detail modal with addit
 | App Ownership | Verified Publisher / Unverified Publisher | Shown under the Third-Party badge only. Clickable filter (no modal) that filters the table by publisher verification |
 | Permissions | App: N | Full list of application permissions with resource; each permission links to the Graph Permissions Explorer |
 | Permissions | Delegated: N | Full list of delegated permissions with resource; each permission links to the Graph Permissions Explorer |
-| Permissions | Roles: N | Full list of directory roles assigned to the service principal |
-| Risk | Critical / High / Medium / Low | Total risk score plus every contributing signal, sorted highest-to-lowest with individual point values; permission-based factors link to the Graph Permissions Explorer and some factors carry a hover tooltip |
+| Permissions | Roles: N | Full list of directory roles assigned to the service principal; each role links to the Microsoft Learn built-in roles reference |
+| Risk | Critical / High / Medium / Low | Total risk score plus every contributing signal, sorted highest-to-lowest with individual point values; permission factors link to the Graph Permissions Explorer, directory-role factors link to Microsoft Learn, and some factors carry a hover tooltip |
 | Credentials | Certs: N | Each active certificate: display name, Key ID, valid from, and expiry date |
 | Credentials | Secrets: N | Each active client secret: display name, Key ID, created date, and expiry date |
 | Credentials | Expiring: N | Plain badge only — no modal; use the filter panel to isolate expiring apps |

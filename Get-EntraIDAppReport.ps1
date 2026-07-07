@@ -265,6 +265,15 @@ function ConvertTo-HtmlSafe {
     $Text.Replace('&','&amp;').Replace('<','&lt;').Replace('>','&gt;').Replace('"','&quot;').Replace("'",'&#39;')
 }
 
+# Build the Microsoft Learn deep link for an Entra built-in role.
+# The reference page uses GitHub-style anchors: role name lowercased, non-alphanumerics
+# dropped, and spaces collapsed to single hyphens (e.g. 'Global Administrator' -> '#global-administrator').
+function Get-EntraRoleLearnUrl {
+    param([string]$RoleName)
+    $anchor = (($RoleName.ToLower() -replace '[^a-z0-9 -]', '') -replace '\s+', '-')
+    return "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#$anchor"
+}
+
 # Enhanced function to get both Service Principal and App Registration owners
 function Get-ServicePrincipalOwners {
     param(
@@ -447,11 +456,11 @@ function Get-RiskScore {
             $uniqueRoles += $role.Permission
             if ($role.Permission -in $riskConfig.HighRiskDirectoryRoles) {
                 $score += 15
-                $riskFactors += [PSCustomObject]@{ Text = "High-risk directory role: $($role.Permission)"; Points = 15 }
+                $riskFactors += [PSCustomObject]@{ Text = "High-risk directory role: $($role.Permission)"; Points = 15; Role = $role.Permission }
             }
             else {
                 $score += 5
-                $riskFactors += [PSCustomObject]@{ Text = "Directory role: $($role.Permission)"; Points = 5 }
+                $riskFactors += [PSCustomObject]@{ Text = "Directory role: $($role.Permission)"; Points = 5; Role = $role.Permission }
             }
         }
     }
@@ -1834,7 +1843,8 @@ foreach ($app in $sortedReport) {
             $urlPermName = [Uri]::EscapeDataString($perm.Permission)
             $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPermName' target='_blank' title='View $safePermName on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
         } else {
-            $permLink = $safePermName
+            $roleLearnUrl = Get-EntraRoleLearnUrl $perm.Permission
+            $permLink = "<a href='$roleLearnUrl' target='_blank' title='View $safePermName on Microsoft Learn' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
         }
         $item = "<div class='permission-item $permClass'><strong>[$($perm.Type)]</strong> $permLink on <em>$safeResource</em></div>"
         switch ($perm.Type) {
@@ -1866,6 +1876,13 @@ foreach ($app in $sortedReport) {
                 $urlPerm  = [Uri]::EscapeDataString($_.Permission)
                 $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPerm' target='_blank' title='View $safePerm on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePerm</a>"
                 $factorText = $factorText.Replace($safePerm, $permLink)
+            }
+            # Linkify the directory role name to Microsoft Learn (same as the Roles modal)
+            if ($_.Role) {
+                $safeRole = ConvertTo-HtmlSafe $_.Role
+                $roleLearnUrl = Get-EntraRoleLearnUrl $_.Role
+                $roleLink = "<a href='$roleLearnUrl' target='_blank' title='View $safeRole on Microsoft Learn' style='color:inherit;text-decoration:underline dotted;'>$safeRole</a>"
+                $factorText = $factorText.Replace($safeRole, $roleLink)
             }
             $detailMarker = if ($_.Detail) { " <span title='$(ConvertTo-HtmlSafe $_.Detail)' style='cursor:help;color:var(--blue)'>&#9432;</span>" } else { "" }
             $pointsCell = if ($_.Points -gt 0) {
