@@ -19,7 +19,7 @@
 .OUTPUTS
     None. Writes an HTML report to the file specified by -OutputPath.
 .PARAMETER OutputPath
-    Path to save the generated HTML report. Defaults to "EntraIDReport_{TenantName}_{Date}.html".
+    Path to save the generated HTML report. Defaults to "EntraIDAppReport__{TenantName}_{Date}.html".
 .PARAMETER TenantId
     Optional. The Entra ID tenant ID to connect to. Required when using Service Principal authentication.
 .PARAMETER AccessToken
@@ -126,6 +126,19 @@ $script:MicrosoftTenantIds = @(
     'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'   # Microsoft Azure
 )
 
+# High-value first-party apps (CLI / automation tooling) that are common targets for token theft,
+# illicit consent and lateral movement. Most users never need them and some need only occasional access.
+# When such an app does NOT require assignment (open to every user in the tenant), it is flagged Critical.
+# Add more 'appId' = 'friendly name' entries here as needed.
+$script:HighValueTargetApps = @{
+    '04b07795-8ddb-461a-bbee-02f9e1bf7b46' = 'Microsoft Azure CLI'
+    '1950a258-227b-4e31-a9cf-717495945fc2' = 'Azure PowerShell'
+    '1b730954-1685-4b74-9bfd-dac224a7b894' = 'Azure Active Directory PowerShell'
+    'fb78d390-0c51-40cd-8e17-fdbfab77341b' = 'Exchange Online PowerShell'
+    '14d82eec-204b-4c2f-b7e8-296a70dab67e' = 'Microsoft Graph Command Line Tools'
+    '09abbdfd-ed23-44ee-a2d9-a627aa1c90f3' = 'Microsoft Graph PowerShell'
+}
+
 # Risk scoring configuration
 $riskConfig = @{
     HighRiskPermissions = @(
@@ -147,10 +160,17 @@ $riskConfig = @{
         'Mail.Read', 'Mail.Send', 'User.ReadBasic.All'
     )
     HighRiskDirectoryRoles = @(
-        'Global Administrator', 'Privileged Role Administrator', 'Security Administrator',
-        'Application Administrator', 'Cloud Application Administrator', 'User Administrator',
-        'Exchange Administrator', 'SharePoint Administrator', 'Intune Administrator', 'Conditional Access Administrator',
-        'Privileged Authentication Administrator', 'Hybrid Identity Administrator', 'Authentication Administrator'
+        'Agent ID Administrator', 'AI Administrator', 'AI Reader',
+        'Application Administrator', 'Application Developer', 'Attribute Provisioning Administrator',
+        'Attribute Provisioning Reader', 'Authentication Administrator', 'Authentication Extensibility Administrator',
+        'Authentication Extensibility Password Administrator', 'B2C IEF Keyset Administrator', 'Cloud Application Administrator',
+        'Cloud Device Administrator', 'Conditional Access Administrator', 'Directory Writers',
+        'Domain Name Administrator', 'External Identity Provider Administrator', 'Global Administrator',
+        'Global Reader', 'Helpdesk Administrator', 'Hybrid Identity Administrator',
+        'Identity Governance Administrator', 'Intune Administrator', 'Lifecycle Workflows Administrator',
+        'Partner Tier1 Support', 'Partner Tier2 Support', 'Password Administrator',
+        'Privileged Authentication Administrator', 'Privileged Role Administrator', 'Security Administrator',
+        'Security Operator', 'Security Reader', 'User Administrator'
     )
     SuspiciousKeywords = @(
         'test', 'demo', 'temp', 'old', 'backup', 'legacy', 'dev', 'staging', 'admin', 'service', 'support', 'update', 'security', 'patch',
@@ -381,7 +401,10 @@ function Get-RiskScore {
         [bool]$UsesPasswordSecrets,
         [int]$SecretCount,
         [bool]$HasLongLivedCredentials,
-        [bool]$IsEnabled = $true
+        [bool]$IsEnabled = $true,
+        [bool]$IsVerifiedPublisher = $false,
+        [bool]$IsHighValueTargetApp = $false,
+        [string]$HighValueTargetName = $null
     )
     
     $score = 0
@@ -400,21 +423,21 @@ function Get-RiskScore {
         
         # Only count each unique permission once
         if ($perm.Permission -in $riskConfig.HighRiskPermissions -and $perm.Permission -notin $uniqueHighRiskPerms) {
-            $score += 10
+            $score += 15
             $uniqueHighRiskPerms += $perm.Permission
-            $riskFactors += "High-risk permission: $($perm.Permission)"
+            $riskFactors += [PSCustomObject]@{ Text = "High-risk permission: $($perm.Permission)"; Points = 15; Permission = $perm.Permission }
         }
         elseif ($perm.Permission -in $riskConfig.MediumRiskPermissions -and $perm.Permission -notin $uniqueMediumRiskPerms) {
             $score += 5
             $uniqueMediumRiskPerms += $perm.Permission
-            $riskFactors += "Medium-risk permission: $($perm.Permission)"
+            $riskFactors += [PSCustomObject]@{ Text = "Medium-risk permission: $($perm.Permission)"; Points = 5; Permission = $perm.Permission }
         }
     }
     
     # Application permissions bonus (only once, not per permission)
     if ($hasApplicationPerms) {
         $score += 5
-        $riskFactors += "Has application permissions"
+        $riskFactors += [PSCustomObject]@{ Text = "Has application permissions"; Points = 5 }
     }
     
     # Directory role scoring - only count unique roles
@@ -424,11 +447,11 @@ function Get-RiskScore {
             $uniqueRoles += $role.Permission
             if ($role.Permission -in $riskConfig.HighRiskDirectoryRoles) {
                 $score += 15
-                $riskFactors += "High-risk directory role: $($role.Permission)"
+                $riskFactors += [PSCustomObject]@{ Text = "High-risk directory role: $($role.Permission)"; Points = 15 }
             }
             else {
-                $score += 8
-                $riskFactors += "Directory role: $($role.Permission)"
+                $score += 5
+                $riskFactors += [PSCustomObject]@{ Text = "Directory role: $($role.Permission)"; Points = 5 }
             }
         }
     }
@@ -441,94 +464,103 @@ function Get-RiskScore {
         }
     }
     if ($suspiciousKeywords.Count -gt 0) {
-        $score += 5
-        $riskFactors += "Suspicious name contains: $($suspiciousKeywords -join ', ')"
+        $score += 2
+        $riskFactors += [PSCustomObject]@{ Text = "Suspicious name contains: $($suspiciousKeywords -join ', ')"; Points = 2 }
     }
     
     # High user count with sensitive permissions (only check once)
     if ($TotalUsers -eq "All Users" -and ($uniqueHighRiskPerms.Count -gt 0 -or $uniqueMediumRiskPerms.Count -gt 0)) {
         $score += 5
-        $riskFactors += "Sensitive permissions with all users access"
+        $riskFactors += [PSCustomObject]@{ Text = "Sensitive permissions with all users access"; Points = 5 }
     }
     elseif ($TotalUsers -is [int] -and $TotalUsers -gt 50 -and ($uniqueHighRiskPerms.Count -gt 0 -or $uniqueMediumRiskPerms.Count -gt 0)) {
         $score += 3
-        $riskFactors += "Sensitive permissions affecting many users ($TotalUsers users)"
-    }
-    
-    # No active credentials (only for apps with registrations, check once)
-    if (-not $HasCredentials -and $HasAppRegistration) {
-        $score += 4
-        $riskFactors += "No active credentials/certificates"
+        $riskFactors += [PSCustomObject]@{ Text = "Sensitive permissions affecting many users ($TotalUsers users)"; Points = 3 }
     }
         
     # Enhanced ownership checks
     if (-not $HasAnyOwners) {
-        $score += 5
-        $riskFactors += "No owners assigned (neither Service Principal nor App Registration)"
+        $score += 4
+        $riskFactors += [PSCustomObject]@{ Text = "No owners assigned (neither Service Principal nor App Registration)"; Points = 4 }
     }
     elseif (-not $HasServicePrincipalOwners -and $HasAppRegistration) {
-        $score += 3
-        $riskFactors += "No Service Principal owners (only App Registration owners)"
+        $score += 2
+        $riskFactors += [PSCustomObject]@{ Text = "No Service Principal owners (only App Registration owners)"; Points = 2 }
     }
     elseif (-not $HasAppRegistrationOwners -and $HasAppRegistration) {
         $score += 2
-        $riskFactors += "No App Registration owners (only Service Principal owners)"
+        $riskFactors += [PSCustomObject]@{ Text = "No App Registration owners (only Service Principal owners)"; Points = 2 }
     }
     
     # Ownership gap detection (only for internal applications)
     if ($HasAppRegistration -and $isInternalApp -and ($HasServicePrincipalOwners -ne $HasAppRegistrationOwners)) {
-        $score += 2
-        $riskFactors += "Ownership gap - owners differ between Service Principal and App Registration"
+        $score += 1
+        $riskFactors += [PSCustomObject]@{ Text = "Ownership gap - owners differ between Service Principal and App Registration"; Points = 1 }
     }
     
-    # Assignment not required (open access risk)
+    # Assignment not required (open access risk).
+    # High-value first-party tooling apps (Azure CLI, Azure/AzureAD PowerShell, Exchange PowerShell,
+    # Graph CLI/PowerShell) are prime targets for token theft, illicit consent and lateral movement.
+    # When such an app doesn't require assignment, EVERY user in the tenant can use it — record only the
+    # single highest factor (+30) instead of also adding the generic +4.
     if (-not $AssignmentRequired) {
-        $score += 4
-        $riskFactors += "Assignment not required"
+        if ($IsHighValueTargetApp) {
+            $score += 50
+            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required for high-value app"; Points = 50; Detail = "Rarely needed by users and a frequent abuse target. Lock it down with Assignment Required option" }
+        } else {
+            $score += 5
+            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required"; Points = 5 }
+        }
     }
 
     # Credential type: secrets are less secure than certificates
     if ($UsesPasswordSecrets) {
         $score += 5
-        $riskFactors += "Uses password secrets (certificates preferred)"
+        $riskFactors += [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5 }
     }
 
     # Multiple secrets increase attack surface
     if ($SecretCount -gt 1) {
-        $score += 2
-        $riskFactors += "Multiple secrets configured ($SecretCount) - reduces auditability"
+        $score += 5
+        $riskFactors += [PSCustomObject]@{ Text = "Multiple secrets configured ($SecretCount) - reduces auditability"; Points = 5 }
     }
 
     # Long-lived credentials (> 1 year) are harder to rotate and track
     if ($HasLongLivedCredentials) {
-        $score += 3
-        $riskFactors += "Long-lived credentials (expiry > 1 year)"
+        $score += 5
+        $riskFactors += [PSCustomObject]@{ Text = "Long-lived credentials (expiry > 1 year)"; Points = 5 }
     }
 
     # External apps are registered in another tenant. No control over registration or credential rotation
     # Microsoft owned apps are excluded as they are trusted first-party services
     if (-not $IsInternalApp -and -not $IsMicrosoftApp) {
         $score += 5
-        $riskFactors += "External application registered in another tenant"
+        $riskFactors += [PSCustomObject]@{ Text = "External application registered in another tenant"; Points = 5 }
+
+        # An external app without a Microsoft-verified publisher has an unverified developer identity
+        if (-not $IsVerifiedPublisher) {
+            $score += 5
+            $riskFactors += [PSCustomObject]@{ Text = "External application has no verified publisher"; Points = 5 }
+        }
     }
 
-    # Disabled apps retain their full raw score for awareness but are de-prioritised
-    # by a 0.3 multiplier — they cannot be exploited while disabled so should not
-    # dominate the report over active apps with the same permission set.
+    # Disabled apps keep their full inherent risk score — a disabled app can be
+    # re-enabled with a single admin toggle, so an over-privileged dormant app is
+    # still a real risk. The Enabled column / filter indicates current exploitability.
     if (-not $IsEnabled) {
-        $score = [int][Math]::Ceiling($score * 0.3)
-        $riskFactors += "App is disabled — score reduced to reflect lower active risk"
+        $riskFactors += [PSCustomObject]@{ Text = "App is disabled (inherent risk shown; not currently exploitable until re-enabled)"; Points = 0 }
     }
 
     # Score thresholds:
-    #   Low < 10 ≤ Medium < 20 ≤ High < 30 ≤ Critical
+    #   Low < 15 ≤ Medium < 35 ≤ High < 50 ≤ Critical
     # Calibration reference points:
-    #   Single high-risk permission (10) → Medium
-    #   High-risk perm + app-type bonus + no owners (10+5+5) → High
-    #   Two high-risk perms + high-risk directory role (10+10+15) → Critical
+    #   Assignment not required + no owners (5+4) → Low
+    #   One medium-risk perm + app-type + open access + secrets (5+5+5+5) → Medium
+    #   Two high-risk perms + app-type + open access + secrets + long-lived (20+5+5+5+5) → High
+    #   Two high-risk perms + app-type + high-value open access + secrets + long-lived (20+5+15+5+5) → Critical
     return @{
         Score  = $score
-        Level  = if ($score -ge 30) { "Critical" } elseif ($score -ge 20) { "High" } elseif ($score -ge 10) { "Medium" } else { "Low" }
+        Level  = if ($score -ge 50) { "Critical" } elseif ($score -ge 35) { "High" } elseif ($score -ge 15) { "Medium" } else { "Low" }
         Factors = $riskFactors
     }
 }
@@ -714,7 +746,7 @@ $servicePrincipals = Get-MgServicePrincipal -All -Property @(
     "Id", "AppId", "DisplayName", "AppOwnerOrganizationId",
     "ServicePrincipalType", "AppRoles", "Oauth2PermissionScopes", "SignInAudience",
     "Tags", "AppDisplayName", "CreatedDateTime", "Owners", "AppRoleAssignmentRequired", "AccountEnabled",
-    "PasswordCredentials", "KeyCredentials"
+    "PasswordCredentials", "KeyCredentials", "VerifiedPublisher"
 ) | Where-Object {
     $_.ServicePrincipalType -eq "Application" -and
     #$_.AppOwnerOrganizationId -ne "f8cdef31-a31e-4b4a-93e4-5f571e91255a" -and
@@ -724,10 +756,10 @@ $servicePrincipals = Get-MgServicePrincipal -All -Property @(
         "00000003-0000-0ff1-ce00-000000000000", # Office 365 SharePoint Online
         "c5393580-f805-4401-95e8-94b7a6ef2fc2", # Office 365 Management APIs
         "d3590ed6-52b3-4102-aeff-aad2292ab01c", # Microsoft Office
-        "09abbdfd-ed23-44ee-a2d9-a627aa1c90f3", # Microsoft Graph PowerShell
-        "1b730954-1685-4b74-9bfd-dac224a7b894", # Azure Active Directory PowerShell
-        "1950a258-227b-4e31-a9cf-717495945fc2", # Microsoft Azure PowerShell
-        "797f4846-ba00-4fd7-ba43-dac1f8f63013" # Windows Azure Service Management API
+        "797f4846-ba00-4fd7-ba43-dac1f8f63013"  # Windows Azure Service Management API
+        # NOTE: Azure PowerShell (1950a258...), Azure AD PowerShell (1b730954...) and Microsoft Graph
+        # PowerShell (09abbdfd...) are intentionally NOT excluded so they can be surfaced and
+        # risk-scored as high-value target apps.
     ) -and
     ($_.Tags -contains "WindowsAzureActiveDirectoryIntegratedApp" -or
      $_.AppOwnerOrganizationId -eq $currentTenantId -or
@@ -921,6 +953,14 @@ foreach ($sp in $servicePrincipals) {
     $isInternalApp = $sp.AppOwnerOrganizationId -eq $currentTenantId
     $isMicrosoftApp = $sp.AppOwnerOrganizationId -in $script:MicrosoftTenantIds
 
+    # Verified publisher — a Microsoft-verified developer identity (mainly relevant for external apps)
+    $isVerifiedPublisher = [bool]($sp.VerifiedPublisher -and $sp.VerifiedPublisher.DisplayName)
+    $verifiedPublisherName = if ($isVerifiedPublisher) { $sp.VerifiedPublisher.DisplayName } else { $null }
+
+    # High-value target app — first-party CLI/automation apps that are common abuse targets
+    $isHighValueTargetApp = $script:HighValueTargetApps.ContainsKey($sp.AppId)
+    $highValueTargetName = if ($isHighValueTargetApp) { $script:HighValueTargetApps[$sp.AppId] } else { $null }
+
     # Calculate risk score with enhanced ownership parameters
     $riskAssessment = Get-RiskScore `
         -Permissions $permissions `
@@ -938,7 +978,10 @@ foreach ($sp in $servicePrincipals) {
         -UsesPasswordSecrets $credentials.UsesPasswordSecrets `
         -SecretCount $credentials.SecretCount `
         -HasLongLivedCredentials $credentials.HasLongLivedCredentials `
-        -IsEnabled $isEnabled
+        -IsEnabled $isEnabled `
+        -IsVerifiedPublisher $isVerifiedPublisher `
+        -IsHighValueTargetApp $isHighValueTargetApp `
+        -HighValueTargetName $highValueTargetName
     $report += [PSCustomObject]@{
         DisplayName = $sp.DisplayName
         AppId = $sp.AppId
@@ -960,6 +1003,8 @@ foreach ($sp in $servicePrincipals) {
         OwnershipGap = $credentials.HasAppRegistration -and (($ownerInfo.CombinedOwners | Where-Object { $_.Source -ne 'Both' }).Count -gt 0)
         AssignmentRequired = $assignmentRequired
         IsEnabled = $isEnabled
+        IsVerifiedPublisher = $isVerifiedPublisher
+        VerifiedPublisherName = $verifiedPublisherName
         
         # Permissions
         TotalPermissions = $permissions.Count
@@ -1041,7 +1086,16 @@ $tenantId = $tenantInfo.Id
 
 if (-not $OutputPath) {
     $safeName = $tenantName -replace '[^\w]', '_'
-    $OutputPath = "EntraIDReport_${safeName}_$(Get-Date -Format 'yyyy-MM-dd').html"
+    $OutputPath = "EntraIDAppReport__${safeName}_$(Get-Date -Format 'yyyy-MM-dd').html"
+}
+
+# Resolve a relative output path against the current PowerShell location.
+# .NET file APIs (WriteAllText / Path.GetFullPath) resolve relative paths against
+# [Environment]::CurrentDirectory (the process start directory, e.g. C:\Windows\System32
+# for elevated shells), NOT PowerShell's $PWD. Making the path absolute here ensures the
+# report is written where the user expects — next to their current location.
+if (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
+    $OutputPath = Join-Path (Get-Location).Path $OutputPath
 }
 
 # Ensure output directory exists
@@ -1591,13 +1645,18 @@ $html = @"
     </div>
 
     <div class="controls" id="controlsPanel" hidden>
-        <input type="text" id="searchInput" class="filter-search" placeholder="Search by application name or App ID..." onkeyup="applyFilters()">
+        <input type="text" id="searchInput" class="filter-search" placeholder="Search by application name, App ID, owner or permission..." oninput="queueApplyFilters()">
 
         <div class="filter-group">
             <span class="filter-group-label">Ownership</span>
             <span class="filter-tag c-green" data-group="ownership" data-value="internal"    onclick="toggleTag(this)">Internal <span class="cnt"></span></span>
             <span class="filter-tag c-blue"  data-group="ownership" data-value="microsoft"   onclick="toggleTag(this)">Microsoft <span class="cnt"></span></span>
             <span class="filter-tag c-red"   data-group="ownership" data-value="third-party" onclick="toggleTag(this)">Third-Party <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">Publisher</span>
+            <span class="filter-tag c-green" data-group="publisher" data-value="verified"   onclick="toggleTag(this)">Verified <span class="cnt"></span></span>
+            <span class="filter-tag c-gray"  data-group="publisher" data-value="unverified" onclick="toggleTag(this)">Unverified <span class="cnt"></span></span>
         </div>
         <div class="filter-group">
             <span class="filter-group-label">Enabled</span>
@@ -1693,6 +1752,23 @@ foreach ($app in $sortedReport) {
         "microsoft"   { "microsoft-app" }
         "third-party" { "external-app" }
     }
+
+    # For external third-party apps, show whether the developer has a Microsoft-verified publisher
+    if ($ownershipType -eq "third-party") {
+        if ($app.IsVerifiedPublisher) {
+            $vpName = ConvertTo-HtmlSafe $app.VerifiedPublisherName
+            $ownershipText += "<div style='margin-top:4px'><span class='badge green clickable-badge' data-fg='publisher' data-fv='verified' title='Microsoft-verified publisher: $vpName. Click to filter'>Verified Publisher</span></div>"
+        } else {
+            $ownershipText += "<div style='margin-top:4px'><span class='badge gray clickable-badge' data-fg='publisher' data-fv='unverified' title='No Microsoft-verified publisher. The developer identity behind this app has not been verified. Click to filter'>Unverified Publisher</span></div>"
+        }
+    }
+
+    # Publisher filter value — only meaningful for third-party apps ('na' excludes internal/Microsoft from the filter)
+    $verifiedPublisherValue = if ($ownershipType -eq "third-party") {
+        if ($app.IsVerifiedPublisher) { "verified" } else { "unverified" }
+    } else {
+        "na"
+    }
     
     # Determine assignment requirement
     $assignmentRequiredText = if ($app.AssignmentRequired) { "<span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Users and groups must be explicitly assigned to access this app'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='All users in the tenant can access this app without explicit assignment'>No</span>" }
@@ -1772,9 +1848,34 @@ foreach ($app in $sortedReport) {
     if (-not $rolePermItems)      { $rolePermItems      = "No directory roles assigned" }
 
     # Build risk factors — escape each item as it may contain API-sourced permission/app names
+    # Points are shown on the left (red, fixed-width) and factors are sorted highest-to-lowest,
+    # with 0-point informational items last. An optional Detail renders as a hover tooltip.
     $riskFactorsHtml = if ($app.RiskFactors.Count -gt 0) {
-        $riskFactorItems = ($app.RiskFactors | ForEach-Object { "<li>$(ConvertTo-HtmlSafe $_)</li>" }) -join ""
-        "<ul style='margin:5px 0; padding-left: 20px;'>$riskFactorItems</ul>"
+        # Stable sort: descending by points, preserving original order within equal points.
+        # (Windows PowerShell 5.1 Sort-Object is not stable, so use an index tiebreaker.)
+        $factorIndex = 0
+        $sortedFactors = $app.RiskFactors |
+            ForEach-Object { [PSCustomObject]@{ Factor = $_; Order = $factorIndex++ } } |
+            Sort-Object -Property @{ Expression = { $_.Factor.Points }; Descending = $true }, @{ Expression = { $_.Order }; Ascending = $true } |
+            ForEach-Object { $_.Factor }
+        $riskFactorItems = ($sortedFactors | ForEach-Object {
+            $factorText = ConvertTo-HtmlSafe $_.Text
+            # Linkify the permission name to the Graph Permissions Explorer (same as the permission modals)
+            if ($_.Permission) {
+                $safePerm = ConvertTo-HtmlSafe $_.Permission
+                $urlPerm  = [Uri]::EscapeDataString($_.Permission)
+                $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPerm' target='_blank' title='View $safePerm on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePerm</a>"
+                $factorText = $factorText.Replace($safePerm, $permLink)
+            }
+            $detailMarker = if ($_.Detail) { " <span title='$(ConvertTo-HtmlSafe $_.Detail)' style='cursor:help;color:var(--blue)'>&#9432;</span>" } else { "" }
+            $pointsCell = if ($_.Points -gt 0) {
+                "<span style='color:var(--bad);font-weight:600'>+$($_.Points)</span>"
+            } else {
+                "<span style='color:var(--text-muted)'>&mdash;</span>"
+            }
+            "<li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'>$pointsCell</span><span>$factorText$detailMarker</span></li>"
+        }) -join ""
+        "<div style='margin:0 0 12px 0;font-size:14px;font-weight:600'>Total Risk Score: <span style='color:var(--bad)'>$($app.RiskScore)</span> ($($app.RiskLevel))</div><ul style='margin:5px 0; padding-left: 4px; list-style:none'>$riskFactorItems</ul>"
     } else {
         "No specific risk factors identified"
     }
@@ -1789,6 +1890,18 @@ foreach ($app in $sortedReport) {
     }
     
     $safeDisplayName = ConvertTo-HtmlSafe $app.DisplayName
+    $ownerSearchText = if ($app.Owners -and $app.Owners.Count -gt 0) {
+        ($app.Owners | ForEach-Object { "$($_.DisplayName) $($_.UserPrincipalName) $($_.Type)" }) -join ' '
+    } else {
+        ''
+    }
+    $permissionSearchText = if ($app.Permissions -and $app.Permissions.Count -gt 0) {
+        ($app.Permissions | ForEach-Object { "$($_.Type) $($_.Permission) $($_.Resource)" }) -join ' '
+    } else {
+        ''
+    }
+    $safeOwnerSearchText = ConvertTo-HtmlSafe $ownerSearchText
+    $safePermissionSearchText = ConvertTo-HtmlSafe $permissionSearchText
     $safeKey = $app.AppId
 
     # Permission badges — badge itself is the modal trigger when count > 0
@@ -1853,8 +1966,18 @@ foreach ($app in $sortedReport) {
         "third-party" { "Third-Party (registered in external tenant)" }
     }
     $safeOrgId = ConvertTo-HtmlSafe "$($app.AppOwnerOrganizationId)"
+    # Publisher row — only shown for third-party apps
+    $publisherRow = ""
+    if ($ownershipType -eq "third-party") {
+        if ($app.IsVerifiedPublisher) {
+            $vpNameSafe = ConvertTo-HtmlSafe $app.VerifiedPublisherName
+            $publisherRow = "<tr><td style='padding:6px 8px;font-weight:bold'>Publisher</td><td style='padding:6px 8px'><span style='color:var(--good);font-weight:600'>Verified</span> &mdash; $vpNameSafe</td></tr>"
+        } else {
+            $publisherRow = "<tr><td style='padding:6px 8px;font-weight:bold'>Publisher</td><td style='padding:6px 8px'><span style='color:var(--bad);font-weight:600'>Unverified</span></td></tr>"
+        }
+    }
     $ownershipModalTitle = "App Ownership for $($app.DisplayName)"
-    $ownershipModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type</td><td style='padding:6px 8px'>$ownershipLabel</td></tr><tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID</td><td style='padding:6px 8px'><code>$safeOrgId</code></td></tr></tbody></table>"
+    $ownershipModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type</td><td style='padding:6px 8px'>$ownershipLabel</td></tr>$publisherRow<tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID</td><td style='padding:6px 8px'><code>$safeOrgId</code></td></tr></tbody></table>"
     # Owners modal — all owners with Enterprise App / App Registration coverage
     $ownersModalTitle = "Owners for $($app.DisplayName) ($($app.Owners.Count) total)"
     if ($app.Owners -and $app.Owners.Count -gt 0) {
@@ -1891,7 +2014,7 @@ foreach ($app in $sortedReport) {
     }
     $modalDataEntries.Add("`"$safeKey`": { appPermsTitle: $(ConvertTo-Json $appPermsModalTitle -Compress), appPermsHtml: $(ConvertTo-Json $appPermItems -Compress), delegatedPermsTitle: $(ConvertTo-Json $delegatedPermsModalTitle -Compress), delegatedPermsHtml: $(ConvertTo-Json $delegatedPermItems -Compress), rolePermsTitle: $(ConvertTo-Json $rolePermsModalTitle -Compress), rolePermsHtml: $(ConvertTo-Json $rolePermItems -Compress), riskTitle: $(ConvertTo-Json $riskModalTitle -Compress), riskHtml: $(ConvertTo-Json $riskFactorsHtml -Compress), certsTitle: $(ConvertTo-Json $certsModalTitle -Compress), certsHtml: $(ConvertTo-Json $certsModalHtml -Compress), secretsTitle: $(ConvertTo-Json $secretsModalTitle -Compress), secretsHtml: $(ConvertTo-Json $secretsModalHtml -Compress), ownershipTitle: $(ConvertTo-Json $ownershipModalTitle -Compress), ownershipHtml: $(ConvertTo-Json $ownershipModalHtml -Compress), ownersTitle: $(ConvertTo-Json $ownersModalTitle -Compress), ownersHtml: $(ConvertTo-Json $ownersModalHtml -Compress), ownershipGapTitle: $(ConvertTo-Json $ownershipGapModalTitle -Compress), ownershipGapHtml: $(ConvertTo-Json $ownershipGapModalHtml -Compress) }")
     $html += @"
-            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
+            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
                 <td><a class="app-name" href="$portalUrl" target="_blank" title="Open in Entra portal">$safeDisplayName</a></td>
                 <td class="$enabledClass">$enabledText</td>
                 <td><code class="mono">$($app.AppId)</code></td>
@@ -1923,7 +2046,7 @@ $html += @"
         const activeFilters = {};
         const groupLabels = {
             ownership: 'Ownership', risk: 'Risk', appreg: 'App Reg',
-            assignment: 'Assignment', owners: 'Owners', permissions: 'Permissions', credentials: 'Credentials', enabled: 'Enabled'
+            assignment: 'Assignment', owners: 'Owners', permissions: 'Permissions', credentials: 'Credentials', enabled: 'Enabled', publisher: 'Publisher'
         };
         const valueLabels = {
             internal: 'Internal', external: 'External', microsoft: 'Microsoft', 'third-party': 'Third-Party',
@@ -1932,12 +2055,17 @@ $html += @"
             required: 'Required', 'not-required': 'Open Access',
             has: 'Has Owners', noowners: 'No Owners', gap: 'Ownership Gap',
             application: 'Application', delegated: 'Delegated', roles: 'Roles', none: 'None',
-            certs: 'Has Certs', secrets: 'Has Secrets', expiring: 'Expiring'
+            certs: 'Has Certs', secrets: 'Has Secrets', expiring: 'Expiring',
+            verified: 'Verified', unverified: 'Unverified'
         };
 
         function rowMatchesTag(row, group, value) {
             switch (group) {
                 case 'ownership':   return row.dataset.ownership === value;
+                case 'publisher':
+                    if (value === 'verified')   return row.dataset.verifiedpublisher === 'verified';
+                    if (value === 'unverified') return row.dataset.verifiedpublisher === 'unverified';
+                    return false;
                 case 'risk':        return row.dataset.risk === value;
                 case 'appreg':      return row.dataset.appreg === value;
                 case 'assignment':  return row.dataset.assignment === value;
@@ -1965,12 +2093,23 @@ $html += @"
             return false;
         }
 
+        let _searchDebounceHandle = null;
+
+        function queueApplyFilters() {
+            if (_searchDebounceHandle) {
+                clearTimeout(_searchDebounceHandle);
+            }
+            _searchDebounceHandle = setTimeout(applyFilters, 150);
+        }
+
         function rowVisible(row) {
             const search = document.getElementById('searchInput').value.toLowerCase().trim();
             if (search) {
                 const nameMatch  = (row.dataset.name  || '').toLowerCase().includes(search);
                 const appIdMatch = (row.dataset.appid || '').toLowerCase().includes(search);
-                if (!nameMatch && !appIdMatch) return false;
+                const ownerMatch = (row.dataset.ownertext || '').toLowerCase().includes(search);
+                const permMatch  = (row.dataset.permtext  || '').toLowerCase().includes(search);
+                if (!nameMatch && !appIdMatch && !ownerMatch && !permMatch) return false;
             }
             for (const group in activeFilters) {
                 const vals = activeFilters[group];

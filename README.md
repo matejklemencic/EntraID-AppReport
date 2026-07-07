@@ -10,6 +10,8 @@ The script connects to Microsoft Graph, retrieves every Enterprise Application r
 - **Directory roles**: Entra ID directory roles assigned directly to the service principal
 - **Ownership**: owners on both the Service Principal and its backing App Registration, with gap detection when the two ownership sets diverge; owners are tracked separately for the Enterprise App and the App Registration
 - **Credentials**: active certificates and client secrets on the App Registration counted separately, including expiry detection within 30 days and long-lived credential detection
+- **Publisher verification**: whether a third-party (external) app has a Microsoft-verified publisher
+- **High-value target apps**: flags well-known first-party admin/automation apps (Azure CLI, Azure/Azure AD PowerShell, Exchange Online PowerShell, Microsoft Graph CLI/PowerShell) that are open to all users
 - **Risk scoring**: a weighted score per app based on the above signals, producing a Critical / High / Medium / Low classification
 - **Governance signals**: whether assignment is required, whether the app is enabled or disabled, whether it is internal, Microsoft-owned, or third-party
 
@@ -20,8 +22,8 @@ The output is a single `.html` file that works offline with no external dependen
 | Feature | Detail |
 |---------|--------|
 | Summary cards | Clickable cards for risk levels, ownership, registration type, and assignment, each filtering the table |
-| Search | Real-time text search across application names |
-| Filter panel | Multi-dimensional filter tags for ownership, risk, credentials, permissions, assignment, and enabled state |
+| Search | Debounced real-time text search across application name, App ID, owner, and permission |
+| Filter panel | Multi-dimensional filter tags for ownership, publisher verification, risk, credentials, permissions, assignment, and enabled state |
 | Column sort | Click any sortable column header to sort ascending; click again to reverse |
 | Export CSV | Downloads the currently visible (filtered) rows as a `.csv` file, UTF-8 with BOM for correct Excel rendering |
 | Dark / light mode | Toggle persisted to `localStorage` |
@@ -34,15 +36,16 @@ The output is a single `.html` file that works offline with no external dependen
 
 ## Interactive badges
 
-Most badges in the report table are clickable and open a detail modal with additional information. Badges that only act as filters (Enabled, App Registration, Assignment Required) are not modal triggers.
+Most badges in the report table are clickable and open a detail modal with additional information. Badges that only act as filters (Enabled, App Registration, Assignment Required, Verified / Unverified Publisher) are not modal triggers.
 
 | Column | Badge | Modal content |
 |--------|-------|---------------|
-| App Ownership | Internal / Microsoft / Third-Party | Tenant ID, tenant name, and registration details for the app |
-| Permissions | App: N | Full list of application permissions with resource and description |
-| Permissions | Delegated: N | Full list of delegated permissions with resource and description |
+| App Ownership | Internal / Microsoft / Third-Party | Ownership type, publisher verification (third-party only), and owner tenant ID |
+| App Ownership | Verified Publisher / Unverified Publisher | Shown under the Third-Party badge only. Clickable filter (no modal) that filters the table by publisher verification |
+| Permissions | App: N | Full list of application permissions with resource; each permission links to the Graph Permissions Explorer |
+| Permissions | Delegated: N | Full list of delegated permissions with resource; each permission links to the Graph Permissions Explorer |
 | Permissions | Roles: N | Full list of directory roles assigned to the service principal |
-| Risk | Critical / High / Medium / Low | Every risk signal that contributed to the score, with individual point values |
+| Risk | Critical / High / Medium / Low | Total risk score plus every contributing signal, sorted highest-to-lowest with individual point values; permission-based factors link to the Graph Permissions Explorer and some factors carry a hover tooltip |
 | Credentials | Certs: N | Each active certificate: display name, Key ID, valid from, and expiry date |
 | Credentials | Secrets: N | Each active client secret: display name, Key ID, created date, and expiry date |
 | Credentials | Expiring: N | Plain badge only — no modal; use the filter panel to isolate expiring apps |
@@ -95,7 +98,7 @@ For **interactive (user) runs**, these are requested as delegated scopes during 
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `-OutputPath` | String | Auto-generated | Path for the HTML report. Defaults to `EntraIDReport_{TenantName}_{Date}.html` in the current directory. |
+| `-OutputPath` | String | Auto-generated | Path for the HTML report. Defaults to `EntraIDAppReport__{TenantName}_{Date}.html` in the current directory. |
 | `-TenantId` | String | None | Entra ID tenant ID. Required for Service Principal authentication. Used when targeting a specific tenant. |
 | `-AccessToken` | SecureString | None | Pre-acquired Microsoft Graph token. Used in Azure DevOps pipelines via `Get-AzAccessToken`. |
 | `-ClientId` | String | None | App (client) ID for Service Principal authentication. Must be combined with `-CertificateThumbprint` and `-TenantId`. |
@@ -175,37 +178,59 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 
 | Level | Score range |
 |-------|-------------|
-| Low | 0 to 9 |
-| Medium | 10 to 19 |
-| High | 20 to 29 |
-| Critical | 30 and above |
+| Low | 0 to 14 |
+| Medium | 15 to 34 |
+| High | 35 to 49 |
+| Critical | 50 and above |
 
 ### Scoring factors
 
 | Signal | Points |
 |--------|--------|
+| High-value app open to all users (assignment not required) — Azure CLI, Azure/Azure AD PowerShell, Exchange PowerShell, Graph CLI/PowerShell | +50 |
 | Each unique high-risk directory role (e.g. Global Administrator, Security Administrator) | +15 |
-| Each unique high-risk permission (e.g. `Directory.ReadWrite.All`, `User.ReadWrite.All`) | +10 |
-| Each other directory role | +8 |
+| Each unique high-risk permission (e.g. `Directory.ReadWrite.All`, `User.ReadWrite.All`) | +15 |
 | Each unique medium-risk permission (e.g. `Directory.Read.All`, `Mail.Send`) | +5 |
+| Each other directory role | +5 |
 | Has any application permissions (bonus, counted once) | +5 |
-| Suspicious keyword in display name (e.g. `test`, `admin`, `temp`, `legacy`) | +5 |
 | Sensitive permissions assigned to all users | +5 |
-| No owners on either Service Principal or App Registration | +5 |
+| Assignment not required (open access, non high-value app) | +5 |
 | Uses password secrets instead of certificates | +5 |
+| Multiple secrets configured | +5 |
+| Long-lived credentials (expiry > 1 year) | +5 |
 | External application (registered in another tenant, not Microsoft) | +5 |
-| No active credentials on an app with an App Registration | +4 |
-| Assignment not required (open access) | +4 |
+| External application without a Microsoft-verified publisher | +5 |
+| No owners on either Service Principal or App Registration | +4 |
 | Sensitive permissions affecting more than 50 users | +3 |
-| No Service Principal owners (App Registration owners only) | +3 |
-| Long-lived credentials (expiry > 1 year) | +3 |
+| No Service Principal owners (App Registration owners only) | +2 |
 | No App Registration owners (Service Principal owners only) | +2 |
-| Ownership gap (SP and App Reg owner sets differ) | +2 |
-| Multiple secrets configured | +2 |
+| Ownership gap (SP and App Reg owner sets differ) | +1 |
+| Suspicious keyword in display name (e.g. `test`, `admin`, `temp`, `legacy`) | +2 |
+| App is disabled (informational only — no score change) | 0 |
 
-### Disabled app adjustment
+Notes:
 
-If an app is disabled (`AccountEnabled = false`), its raw score is multiplied by **0.3** (rounded up). Disabled apps cannot be exploited while disabled, so they are de-prioritised without being completely hidden.
+- The high-value factor (+50) and the generic "assignment not required" factor (+5) are mutually exclusive — a high-value app records only the single higher factor.
+- An external, unverified third-party app accumulates both the external (+5) and unverified-publisher (+5) factors.
+
+### High-value target apps
+
+A small set of first-party command-line / automation apps are common targets for token theft, illicit consent, and lateral movement, and most users never need them. When one of these apps does **not** require assignment (open to every user in the tenant), it is scored +50 — enough to reach **Critical** on its own.
+
+The list is defined in the script as `$script:HighValueTargetApps` and can be extended. It currently contains:
+
+| App | App ID |
+|-----|--------|
+| Microsoft Azure CLI | `04b07795-8ddb-461a-bbee-02f9e1bf7b46` |
+| Azure PowerShell | `1950a258-227b-4e31-a9cf-717495945fc2` |
+| Azure Active Directory PowerShell | `1b730954-1685-4b74-9bfd-dac224a7b894` |
+| Exchange Online PowerShell | `fb78d390-0c51-40cd-8e17-fdbfab77341b` |
+| Microsoft Graph Command Line Tools | `14d82eec-204b-4c2f-b7e8-296a70dab67e` |
+| Microsoft Graph PowerShell | `09abbdfd-ed23-44ee-a2d9-a627aa1c90f3` |
+
+### Disabled app handling
+
+Disabled apps (`AccountEnabled = false`) keep their full inherent risk score. A disabled app can be re-enabled with a single admin toggle, so an over-privileged dormant app is still a real risk. An informational "App is disabled" factor (0 points) is recorded, and the **Enabled** column / filter indicates current exploitability.
 
 ## Custom risk configuration
 
@@ -238,6 +263,8 @@ The file must be valid JSON with all four required keys:
 ```
 
 If the file is missing any of the four keys, the script falls back to the built-in defaults and logs a warning. The file must exist at the path provided; the parameter validates this at startup.
+
+> The high-value target app list (`$script:HighValueTargetApps`) and the Microsoft first-party tenant IDs are defined directly in the script, not in this JSON file. Edit the script to change them.
 
 ## Azure DevOps pipeline
 
@@ -294,7 +321,7 @@ To change the schedule, update the `cron` expression. To disable the schedule an
 The artifact `EntraIDAppReport` contains:
 
 ```
-EntraIDReport_YYYY-MM-DD.html
+EntraIDAppReport__{TenantName}_YYYY-MM-DD.html
 ```
 
 Download the artifact from the pipeline run, open the HTML file in any browser. No internet connection is required.
