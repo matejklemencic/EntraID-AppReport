@@ -30,7 +30,7 @@ steps:
   - task: AzurePowerShell@5
     displayName: "Generate Entra ID App Report"
     inputs:
-      azureSubscription: "SPAN.M365Assessment.ReadOnly.Dev"   # <-- update this
+      azureSubscription: "<YOUR_AZURE_SERVICE_CONNECTION_NAME>"   # <-- update this
       pwsh: true
       azurePowerShellVersion: LatestVersion
       ScriptType: InlineScript
