@@ -9,7 +9,7 @@ The script connects to Microsoft Graph, retrieves every Enterprise Application r
 - **Permissions**: application permissions (app roles) and delegated permissions (OAuth2 grants), including the resource they are granted against
 - **Directory roles**: Entra ID directory roles assigned directly to the service principal
 - **Ownership**: owners on both the Service Principal and its backing App Registration, with gap detection when the two ownership sets diverge; owners are tracked separately for the Enterprise App and the App Registration
-- **Credentials**: active certificates and client secrets on the App Registration counted separately, including expiry detection within 30 days and long-lived credential detection
+- **Credentials**: active certificates and client secrets on the App Registration counted separately, including expiry detection within 30 days, already-expired credential detection, and long-lived credential detection
 - **Publisher verification**: whether a third-party (external) app has a Microsoft-verified publisher
 - **High-value target apps**: flags well-known first-party admin/automation apps (Azure CLI, Azure/Azure AD PowerShell, Exchange Online PowerShell, Microsoft Graph CLI/PowerShell) that are open to all users
 - **Risk scoring**: a weighted score per app based on the above signals, producing a Critical / High / Medium / Low classification
@@ -26,9 +26,10 @@ The output is a single `.html` file that works offline with no external dependen
 | Filter panel | Multi-dimensional filter tags for ownership, publisher verification, risk, credentials, permissions, assignment, and enabled state |
 | Column sort | Click any sortable column header to sort ascending; click again to reverse |
 | Export CSV | Downloads the currently visible (filtered) rows as a `.csv` file, UTF-8 with BOM for correct Excel rendering |
-| Dark / light mode | Toggle persisted to `localStorage` |
+| Dark / light mode | Toggle persisted to `localStorage`; a GitHub repo link icon sits next to the toggle in the header |
 | Portal deep links | Application name links directly to the Entra portal entry for that app |
 | Detail modals | Clickable badges throughout the report open a detail panel with full information — see [Interactive badges](#interactive-badges) |
+| Risk score visual scale | The Risk Analysis modal shows a segmented threshold bar (Low/Medium/High/Critical) with a marker at the app's actual score |
 
 ## Example
 
@@ -36,20 +37,21 @@ The output is a single `.html` file that works offline with no external dependen
 
 ## Interactive badges
 
-Most badges in the report table are clickable and open a detail modal with additional information. Badges that only act as filters (Enabled, App Registration, Assignment Required, Verified / Unverified Publisher) are not modal triggers.
+Most badges in the report table are clickable and open a detail modal with additional information. Badges that only act as filters (Enabled, App Registration, Assignment Required) are not modal triggers. Modal tables (Certificates, Secrets, Expiring, Expired, and Owners) are sortable — click any column header to sort ascending, click again to reverse.
 
 | Column | Badge | Modal content |
 |--------|-------|---------------|
 | App Ownership | Internal / Microsoft / Third-Party | Ownership type, publisher verification (third-party only), and owner tenant ID |
-| App Ownership | Verified Publisher / Unverified Publisher | Shown under the Third-Party badge only. Clickable filter (no modal) that filters the table by publisher verification |
+| App Ownership | Verified Publisher / Unverified Publisher | Shown under the Third-Party badge only. Opens the same App Ownership modal as the Third-Party badge |
 | Permissions | App: N | Full list of application permissions with resource; each permission links to the Graph Permissions Explorer |
 | Permissions | Delegated: N | Full list of delegated permissions with resource; each permission links to the Graph Permissions Explorer |
 | Permissions | Roles: N | Full list of directory roles assigned to the service principal; each role links to the Microsoft Learn built-in roles reference |
-| Risk | Critical / High / Medium / Low | Total risk score plus every contributing signal, sorted highest-to-lowest with individual point values; permission factors link to the Graph Permissions Explorer, directory-role factors link to Microsoft Learn, and some factors carry a hover tooltip |
-| Credentials | Certs: N | Each active certificate: display name, Key ID, valid from, and expiry date |
-| Credentials | Secrets: N | Each active client secret: display name, Key ID, created date, and expiry date |
-| Credentials | Expiring: N | Plain badge only — no modal; use the filter panel to isolate expiring apps |
-| Owners | N owner(s) | All owners listed with their coverage (Enterprise App, App Registration, or both) |
+| Risk | Critical / High / Medium / Low | A score header (large point total plus the risk-level badge) followed by every contributing signal, sorted highest-to-lowest with individual point values, and a visual threshold scale bar showing where the score falls between Low/Medium/High/Critical; permission factors link to the Graph Permissions Explorer, directory-role factors link to Microsoft Learn, and some factors carry a hover tooltip |
+| Credentials | Certs: N | Sortable table of each active certificate: display name, valid from, expiry date (highlighted if expiring/expired), and Key ID |
+| Credentials | Secrets: N | Sortable table of each active client secret: display name, created date, expiry date (highlighted if expiring/expired), and Key ID |
+| Credentials | Expiring: N | Sortable table of only the certificates/secrets expiring within 30 days, across both types |
+| Credentials | Expired: N | Sortable table of only the certificates/secrets that have already expired, across both types |
+| Owners | N owner(s) | Sortable table of all owners with their coverage (Enterprise App, App Registration, or both) |
 | Owners | Ownership Gap | Owners that are not assigned to both the Service Principal and the App Registration |
 | Owners | No owners | Plain badge — no modal |
 

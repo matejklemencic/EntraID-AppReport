@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entra ID Enterprise Application Risk Assessment</title>
+    <style>
+        /* -- Light Theme Variables -- */
+        :root {
+            --blue:        #0078d4;
+            --blue-dark:   #005a9e;
+            --blue-light:  #cce4f6;
+            --blue-xs:     #f0f6fc;
+            --text:        #1a1a1a;
+            --text-muted:  #888;
+            --gray:        #666;
+            --gray-dark:   #444;
+            --bg-page:     #edf2f7;
+            --bg-panel:    #ffffff;
+            --bg-header:   #0078d4;
+            --bg-input:    #ffffff;
+            --bg-subtle:   #f7fafc;
+            --border:      #ddd;
+            --border-row:  #e2e8f0;
+            --shadow:      0 2px 10px rgba(0,0,0,0.08);
+            --radius:      8px;
+
+            --risk-critical-bg:   #fed7d7;
+            --risk-critical-text: #c53030;
+            --risk-high-bg:       #feebc8;
+            --risk-high-text:     #dd6b20;
+            --risk-medium-bg:     #fefcbf;
+            --risk-medium-text:   #b7791f;
+            --risk-low-bg:        #c6f6d5;
+            --risk-low-text:      #2f855a;
+
+            --internal:      #2b6cb0;
+            --external:      #c05621;
+            --good:          #2f855a;
+            --bad:           #c53030;
+            --warn:          #b7791f;
+            --app-perm-text: #c53030;
+        }
+
+        /* -- Dark Theme Variables -- */
+        [data-theme="dark"] {
+            --blue:        #3aa0f3;
+            --blue-dark:   #2b8fd4;
+            --blue-light:  #1a3a55;
+            --blue-xs:     #152030;
+            --text:        #e2e8f0;
+            --text-muted:  #6a7585;
+            --gray:        #9aa5b3;
+            --gray-dark:   #c8d0da;
+            --bg-page:     #111520;
+            --bg-panel:    #1c1f2e;
+            --bg-header:   #0d1117;
+            --bg-input:    #252840;
+            --bg-subtle:   #232738;
+            --border:      #343848;
+            --border-row:  #2a2e3e;
+            --shadow:      0 2px 12px rgba(0,0,0,0.35);
+
+            --risk-critical-bg:   #3a1518;
+            --risk-critical-text: #f98a8a;
+            --risk-high-bg:       #3a2410;
+            --risk-high-text:     #f0a868;
+            --risk-medium-bg:     #332b0d;
+            --risk-medium-text:   #e6c45c;
+            --risk-low-bg:        #122a1a;
+            --risk-low-text:      #6ee7a0;
+
+            --internal:      #63b3ed;
+            --external:      #f6ad55;
+            --good:          #68d391;
+            --bad:           #f98a8a;
+            --warn:          #e6c45c;
+            --app-perm-text: #f98a8a;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            font-size: 14px;
+            color: var(--text);
+            background: var(--bg-page);
+            min-height: 100vh;
+            transition: background 0.25s, color 0.25s;
+        }
+
+        a { color: var(--blue); }
+
+        /* -- Header -- */
+        header {
+            background: var(--bg-header);
+            color: #fff;
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        header .header-text { flex: 1; }
+        header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }
+        header .meta { font-size: 11px; opacity: 0.75; margin-top: 1px; line-height: 1.7; }
+        header .meta strong { font-weight: 600; }
+
+        #themeToggle {
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.25);
+            color: #fff;
+            font-size: 17px;
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.2s, transform 0.2s;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+        #themeToggle:hover { background: rgba(255,255,255,0.25); transform: rotate(20deg); }
+        .github-link {
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.25);
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.2s, transform 0.2s;
+            line-height: 0;
+        }
+        .github-link:hover { background: rgba(255,255,255,0.25); transform: scale(1.1); }
+
+        /* -- Layout -- */
+        .container { max-width: 1600px; margin: 24px auto; padding: 0 24px 48px; }
+
+        /* -- Summary cards -- */
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .summary-card {
+            background: var(--bg-panel);
+            padding: 18px 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border-top: 4px solid var(--blue);
+            text-align: center;
+            cursor: pointer;
+            transition: background 0.25s, box-shadow 0.25s, transform 0.15s;
+        }
+        .summary-card:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,0.12); }
+        .summary-card h3 { margin: 0 0 6px; color: var(--gray-dark); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+        .summary-card .number { font-size: 30px; font-weight: 700; color: var(--blue); margin: 6px 0; }
+        /* Number colors matching badge colors per card type */
+        .summary-card[data-fv="Critical"] .number { color: #c50f1f; }
+        .summary-card[data-fv="High"]     .number { color: #d83b01; }
+        .summary-card[data-fv="Medium"]   .number { color: #b06000; }
+        .summary-card[data-fv="Low"]      .number { color: #107c10; }
+        .summary-card[data-fv="internal"] .number { color: #107c10; }
+        .summary-card[data-fv="microsoft"].number  { color: #0078d4; }
+        .summary-card[data-fv="third-party"] .number { color: #c50f1f; }
+        .summary-card[data-fv="gap"]      .number { color: #b06000; }
+        .summary-card[data-fv="not-required"] .number { color: #767676; }
+        .summary-card[data-fv="no"][data-fg="enabled"] .number { color: #767676; }
+        /* Border colors matching number colors */
+        .summary-card[data-fv="Critical"]            { border-top-color: #c50f1f; }
+        .summary-card[data-fv="High"]                { border-top-color: #d83b01; }
+        .summary-card[data-fv="Medium"]              { border-top-color: #b06000; }
+        .summary-card[data-fv="Low"]                 { border-top-color: #107c10; }
+        .summary-card[data-fv="internal"]            { border-top-color: #107c10; }
+        .summary-card[data-fv="microsoft"]           { border-top-color: #0078d4; }
+        .summary-card[data-fv="third-party"]         { border-top-color: #c50f1f; }
+        .summary-card[data-fv="gap"]                 { border-top-color: #b06000; }
+        .summary-card[data-fv="not-required"]        { border-top-color: #767676; }
+        .summary-card[data-fv="no"][data-fg="enabled"] { border-top-color: #767676; }
+        [data-theme="dark"] .summary-card[data-fv="Critical"] .number { color: #e3223a; }
+        [data-theme="dark"] .summary-card[data-fv="High"]     .number { color: #f0571f; }
+        [data-theme="dark"] .summary-card[data-fv="Medium"]   .number { color: #c87000; }
+        [data-theme="dark"] .summary-card[data-fv="Low"]      .number { color: #2a9d2a; }
+        [data-theme="dark"] .summary-card[data-fv="internal"] .number { color: #2a9d2a; }
+        [data-theme="dark"] .summary-card[data-fv="third-party"] .number { color: #e3223a; }
+        [data-theme="dark"] .summary-card[data-fv="Critical"]  { border-top-color: #e3223a; }
+        [data-theme="dark"] .summary-card[data-fv="High"]      { border-top-color: #f0571f; }
+        [data-theme="dark"] .summary-card[data-fv="Medium"]    { border-top-color: #c87000; }
+        [data-theme="dark"] .summary-card[data-fv="Low"]       { border-top-color: #2a9d2a; }
+        [data-theme="dark"] .summary-card[data-fv="internal"]  { border-top-color: #2a9d2a; }
+        [data-theme="dark"] .summary-card[data-fv="third-party"] { border-top-color: #e3223a; }
+        .summary-card .subtitle { color: var(--text-muted); font-size: 12.5px; }
+
+        /* -- Controls -- */
+        .controls {
+            background: var(--bg-panel);
+            padding: 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            margin-bottom: 24px;
+            transition: background 0.25s, box-shadow 0.25s;
+        }
+        .controls h3 { margin: 0 0 12px; font-size: 14px; color: var(--gray-dark); }
+        .controls input:not(.filter-search), .controls select {
+            margin: 4px; padding: 9px 11px;
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            font-size: 13px;
+            color: var(--text);
+            background: var(--bg-input);
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .controls input:focus, .controls select:focus {
+            outline: none; border-color: var(--blue);
+            box-shadow: 0 0 0 2px var(--blue-light);
+        }
+        .controls button:not(.clear-all) {
+            background: var(--blue); color: #fff; border: none;
+            padding: 9px 18px; border-radius: 5px; cursor: pointer; margin: 4px;
+            font-size: 13px; transition: background 0.2s;
+        }
+        .controls button:not(.clear-all):hover { background: var(--blue-dark); }
+
+        /* -- Tag filters -- */
+        .filter-bar { display: flex; align-items: center; gap: 12px; margin: 4px 0 8px; }
+        .filter-toggle-btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--bg-panel); border: 1px solid var(--border); color: var(--text);
+            padding: 8px 16px; border-radius: 6px;
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .filter-toggle-btn:hover { border-color: var(--blue); background: var(--blue-xs); }
+        .filter-toggle-btn[aria-expanded="true"] { border-color: var(--blue); }
+        .filter-toggle-btn .caret { font-size: 10px; color: var(--gray); transition: transform 0.15s; }
+        .export-csv-btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--bg-panel); border: 1px solid var(--border); color: var(--text);
+            padding: 8px 16px; border-radius: 6px;
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            cursor: pointer; margin-left: auto;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .export-csv-btn:hover { border-color: var(--blue); background: var(--blue-xs); }
+        .filter-summary { font-size: 13px; font-weight: 600; color: var(--text); }
+
+        .clickable-badge { cursor: pointer; transition: filter 0.15s, box-shadow 0.15s; }
+        .clickable-badge:hover { filter: brightness(1.15); }
+
+        .filter-search {
+            width: 100%;
+            margin: 4px 0 28px;
+            padding: 11px 14px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            color: var(--text);
+            background: var(--bg-input);
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .filter-search:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-light); }
+
+        .filter-group { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+        .filter-group-label {
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            color: var(--gray); width: 130px; flex-shrink: 0;
+        }
+        .filter-tag {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 4px 12px; border: 1px solid var(--border); border-radius: 14px;
+            background: var(--bg-panel); color: var(--text); font-size: 12px; font-weight: 600;
+            cursor: pointer; user-select: none;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .filter-tag:hover { border-color: var(--blue); background: var(--blue-xs); }
+        .filter-tag .cnt { font-size: 10px; font-weight: 600; color: var(--text-muted); }
+        .filter-tag.active { color: #fff; border-color: transparent; }
+        .filter-tag.active .cnt { color: rgba(255,255,255,0.85); }
+
+        .filter-tag.active.c-blue   { background: #0078d4; }
+        .filter-tag.active.c-amber  { background: #b06000; }
+        .filter-tag.active.c-red    { background: #c50f1f; }
+        .filter-tag.active.c-orange { background: #d83b01; }
+        .filter-tag.active.c-green  { background: #107c10; }
+        .filter-tag.active.c-purple { background: #7054a0; }
+        .filter-tag.active.c-gray   { background: #767676; }
+
+        [data-theme="dark"] .filter-tag.active.c-green  { background: #2a9d2a; }
+        [data-theme="dark"] .filter-tag.active.c-red    { background: #e3223a; }
+        [data-theme="dark"] .filter-tag.active.c-orange { background: #f0571f; }
+
+        .filter-results {
+            display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+            margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+        }
+        .result-count { font-size: 13px; font-weight: 600; color: var(--gray-dark); margin-right: 4px; }
+        .active-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+        .chip {
+            display: inline-flex; align-items: center; gap: 4px;
+            background: #0078d4; color: #fff; border: none;
+            padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; cursor: pointer;
+        }
+        .chip.c-green  { background: #107c10; }
+        .chip.c-red    { background: #c50f1f; }
+        .chip.c-orange { background: #d83b01; }
+        .chip.c-amber  { background: #b06000; }
+        .chip.c-purple { background: #7054a0; }
+        .chip.c-gray   { background: #767676; }
+        .chip:hover { filter: brightness(1.15); }
+        [data-theme="dark"] .chip.c-green  { background: #2a9d2a; }
+        [data-theme="dark"] .chip.c-red    { background: #e3223a; }
+        [data-theme="dark"] .chip.c-orange { background: #f0571f; }
+        [data-theme="dark"] .chip.c-amber  { background: #c87000; }
+        [data-theme="dark"] .chip.c-purple { background: #9070c0; }
+        .clear-all {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--bg-panel); border: 1px solid var(--border); color: var(--text);
+            padding: 8px 16px; border-radius: 6px;
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            cursor: pointer; margin-left: auto;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .clear-all:hover { border-color: var(--blue); background: var(--blue-xs); }
+
+        /* -- Table -- */
+        .table-wrap {
+            background: var(--bg-panel);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: auto;
+            transition: background 0.25s, box-shadow 0.25s;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 11px 12px; text-align: left; border-bottom: 1px solid var(--border-row); vertical-align: top; }
+        td { font-size: 11px; font-weight: 400; color: var(--gray-dark); letter-spacing: 0.5px; }
+        th {
+            background: var(--bg-subtle); font-weight: 700; cursor: pointer; user-select: none;
+            position: sticky; top: 0; z-index: 1; color: var(--gray-dark);
+            text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px;
+        }
+        th:hover { background: var(--blue-xs); }
+        th.sort-asc::after  { content: ' ▲'; font-size: 0.8em; opacity: 0.7; }
+        th.sort-desc::after { content: ' ▼'; font-size: 0.8em; opacity: 0.7; }
+        tbody tr { transition: background 0.12s; }
+        tbody tr:hover { background: var(--bg-subtle); }
+
+        /* -- Risk row tints -- */
+        .risk-critical { background: var(--risk-critical-bg) !important; color: var(--risk-critical-text); }
+        .risk-high     { background: var(--risk-high-bg) !important; color: var(--risk-high-text); }
+        .risk-medium   { background: var(--risk-medium-bg) !important; color: var(--risk-medium-text); }
+        .risk-low      { background: var(--risk-low-bg) !important; color: var(--risk-low-text); }
+
+        /* -- Badges (pattern-badge style from Name Codex) -- */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #767676;
+            color: #fff;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            vertical-align: middle;
+            text-align: center;
+            line-height: 1.3;
+            white-space: nowrap;
+        }
+        .badge.green   { background: #107c10; }
+        .badge.red     { background: #c50f1f; }
+        .badge.orange  { background: #d83b01; }
+        .badge.amber   { background: #b06000; }
+        .badge.blue    { background: #0078d4; }
+        .badge.teal    { background: #00827f; }
+        .badge.purple  { background: #7054a0; }
+        .badge.gray    { background: #767676; }
+
+        [data-theme="dark"] .badge.green  { background: #2a9d2a; }
+        [data-theme="dark"] .badge.red    { background: #e3223a; }
+        [data-theme="dark"] .badge.orange { background: #f0571f; }
+        [data-theme="dark"] .badge.amber  { background: #c87000; }
+        [data-theme="dark"] .badge.purple { background: #9070c0; }
+
+        .expiring-date { color: #d83b01; font-weight: 700; }
+        .expired-date  { color: #c50f1f; font-weight: 700; }
+        [data-theme="dark"] .expiring-date { color: #f0571f; }
+        [data-theme="dark"] .expired-date  { color: #e3223a; }
+
+        /* -- Risk Analysis modal: score header + threshold scale bar -- */
+        .risk-score-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin: 0 0 14px 0; padding-bottom: 12px; border-bottom: 1px solid var(--border);
+        }
+        .risk-score-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+        .risk-score-value { font-size: 30px; font-weight: 700; line-height: 1.15; color: var(--bad); }
+        .risk-score-header .badge { font-size: 12px; padding: 5px 14px; }
+        .risk-scale-wrap { position: relative; margin: 34px 0 6px; }
+        .risk-scale-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; }
+        .risk-scale-seg.low      { background: #107c10; }
+        .risk-scale-seg.medium  { background: #b06000; }
+        .risk-scale-seg.high     { background: #d83b01; }
+        .risk-scale-seg.critical { background: #c50f1f; }
+        [data-theme="dark"] .risk-scale-seg.low      { background: #2a9d2a; }
+        [data-theme="dark"] .risk-scale-seg.medium   { background: #c87000; }
+        [data-theme="dark"] .risk-scale-seg.high     { background: #f0571f; }
+        [data-theme="dark"] .risk-scale-seg.critical { background: #e3223a; }
+        .risk-scale-marker { position: absolute; top: -22px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; }
+        .risk-scale-marker .risk-scale-marker-value { font-size: 10px; font-weight: 700; color: var(--text); white-space: nowrap; }
+        .risk-scale-marker .risk-scale-arrow { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid var(--text); margin-top: 2px; }
+        .risk-scale-labels { position: relative; height: 14px; margin-top: 4px; }
+        .risk-scale-tick { position: absolute; top: 0; font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+
+        .perm-badges { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+
+        .has-app-reg, .sp-only { color: var(--gray); }
+        .internal-app { color: var(--internal); font-weight: 600; }
+        .external-app { color: var(--external); font-weight: 600; }
+        .assignment-required { color: var(--good); }
+        .assignment-not-required { color: var(--bad); }
+        .has-owners { color: var(--good); }
+        .no-owners { color: var(--bad); }
+        .ownership-gap { color: var(--warn); }
+
+        .mono { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 400; color: var(--gray-dark); letter-spacing: 0.5px; }
+        .muted { color: var(--text-muted); }
+        .tiny { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 400; color: var(--gray-dark); letter-spacing: 0.5px; }
+        .app-name { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 400; color: var(--gray-dark); letter-spacing: 0.5px; text-decoration: none; }
+        .app-name:hover { text-decoration: underline; color: var(--blue); }
+        .cell-sm { font-size: 11px; }
+
+        .permission-list { max-height: none; overflow-y: visible; font-size: 11px; }
+        .permission-item { margin: 2px 5px 2px 0; padding: 2px 6px; border-radius: 3px; display: inline-block; }
+        .app-permission { color: var(--app-perm-text); }
+        .delegated-permission { color: var(--gray); }
+        .directory-role { color: var(--external); }
+
+        details summary { cursor: pointer; color: var(--gray-dark); font-size: 11px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* -- Modal -- */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55); z-index: 1000;
+            align-items: center; justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-box {
+            position: relative;
+            background: var(--bg-panel); color: var(--text);
+            border: 1px solid var(--border); border-radius: 10px;
+            max-width: 720px; width: 90%; max-height: 80vh;
+            overflow-y: auto; padding: 24px 28px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+        }
+        .modal-box h3 { color: var(--text); margin: 0 0 14px 0; padding-right: 30px; font-size: 15px; }
+        .modal-close {
+            position: absolute; top: 12px; right: 14px;
+            background: none; border: none; color: var(--text-muted);
+            font-size: 22px; cursor: pointer; line-height: 1; padding: 0;
+        }
+        .modal-close:hover { color: var(--text); }
+        #detailModalBody .permission-item { display: block; }
+        @media (max-width: 600px) { .modal-box { width: 95%; max-height: 90vh; padding: 18px; } }
+
+        /* -- Footer -- */
+        footer.report-footer {
+            text-align: center;
+            background: var(--bg-header);
+            color: rgba(255,255,255,0.85);
+            font-size: 11px;
+            padding: 16px 24px;
+            margin-top: 0;
+        }
+        footer.report-footer a { color: rgba(255,255,255,0.85); text-decoration: none; }
+        footer.report-footer a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-text">
+            <h1>Entra ID Enterprise Application Risk Assessment</h1>
+            <div class="meta">
+                <strong>Tenant:</strong> Contoso (Demo Tenant) &nbsp;&middot;&nbsp;
+                <strong>Tenant ID:</strong> 11111111-2222-3333-4444-555555555555 &nbsp;&middot;&nbsp;
+                <strong>Generated:</strong> 2026-07-08 19:03:14
+            </div>
+        </div>
+        <a class="github-link" href="https://github.com/matejklemencic/EntraID-AppReport" target="_blank" rel="noopener" title="View source on GitHub"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16" fill="#ffffff"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+        <button id="themeToggle" onclick="toggleTheme()" title="Toggle dark / light mode">&#127769;</button>
+    </header>
+
+    <div class="container">
+
+    <div class="summary">
+        <div class="summary-card" data-clear="1" title="Clear all filters">
+            <h3>Total Applications</h3>
+            <div class="number">6</div>
+            <div class="subtitle">Enterprise Applications analyzed</div>
+        </div>
+        <div class="summary-card" data-fg="risk" data-fv="Critical" title="Critical risk apps require immediate review. They have a combination of high privilege permissions, active credentials and missing controls. Click to filter.">
+            <h3>Critical Risk</h3>
+            <div class="number">1</div>
+            <div class="subtitle">Applications requiring immediate attention</div>
+        </div>
+        <div class="summary-card" data-fg="risk" data-fv="High" title="High risk apps have elevated permissions or missing security controls that should be reviewed. Click to filter.">
+            <h3>High Risk</h3>
+            <div class="number">1</div>
+            <div class="subtitle">Applications with elevated risk scores</div>
+        </div>
+        <div class="summary-card" data-fg="risk" data-fv="Medium" title="Medium risk apps have some risk factors present. Review the risk analysis for details. Click to filter.">
+            <h3>Medium Risk</h3>
+            <div class="number">2</div>
+            <div class="subtitle">Applications with moderate risk scores</div>
+        </div>
+        <div class="summary-card" data-fg="risk" data-fv="Low" title="Low risk apps have no significant security concerns detected. Click to filter.">
+            <h3>Low Risk</h3>
+            <div class="number">2</div>
+            <div class="subtitle">Applications with minimal risk</div>
+        </div>
+        <div class="summary-card" data-fg="ownership" data-fv="internal" title="Apps registered in this tenant and owned by your organization. Click to filter.">
+            <h3>Internal Apps</h3>
+            <div class="number">3</div>
+            <div class="subtitle">Apps owned by your organization</div>
+        </div>
+        <div class="summary-card" data-fg="ownership" data-fv="microsoft" title="First party Microsoft applications. These are owned and operated by Microsoft. Click to filter.">
+            <h3>Microsoft Apps</h3>
+            <div class="number">1</div>
+            <div class="subtitle">First-party Microsoft services</div>
+        </div>
+        <div class="summary-card" data-fg="ownership" data-fv="third-party" title="Apps registered in another tenant by a third party. Click to filter.">
+            <h3>Third-Party Apps</h3>
+            <div class="number">2</div>
+            <div class="subtitle">Third-party external applications</div>
+        </div>
+        <div class="summary-card" data-fg="owners" data-fv="gap" title="Not all owners are assigned to both the Service Principal and the App Registration. Click to filter.">
+            <h3>Ownership Gaps</h3>
+            <div class="number">1</div>
+            <div class="subtitle">Apps with ownership inconsistencies</div>
+        </div>
+        <div class="summary-card" data-fg="assignment" data-fv="not-required" title="All users in the tenant can access this app without explicit assignment. Click to filter.">
+            <h3>Open Access</h3>
+            <div class="number">3</div>
+            <div class="subtitle">Apps with no assignment required</div>
+        </div>
+        <div class="summary-card" data-fg="enabled" data-fv="no" title="User sign-in is blocked for these applications. They are visible in the tenant but cannot be used. Click to filter.">
+            <h3>Disabled Apps</h3>
+            <div class="number">1</div>
+            <div class="subtitle">Apps with sign-in disabled</div>
+        </div>
+    </div>
+
+    <div class="filter-bar">
+        <button id="filterToggle" class="filter-toggle-btn" onclick="toggleFilterPanel()" aria-expanded="false">
+            <span class="caret">&#9656;</span> Search &amp; Filter
+        </button>
+        <span id="filterSummary" class="filter-summary"></span>
+        <button class="export-csv-btn" onclick="exportCsv()" title="Download visible rows as CSV">&#8595; Export CSV</button>
+    </div>
+
+    <div class="controls" id="controlsPanel" hidden>
+        <input type="text" id="searchInput" class="filter-search" placeholder="Search by application name, App ID, owner or permission..." oninput="queueApplyFilters()">
+
+        <div class="filter-group">
+            <span class="filter-group-label">Ownership</span>
+            <span class="filter-tag c-green" data-group="ownership" data-value="internal"    onclick="toggleTag(this)">Internal <span class="cnt"></span></span>
+            <span class="filter-tag c-blue"  data-group="ownership" data-value="microsoft"   onclick="toggleTag(this)">Microsoft <span class="cnt"></span></span>
+            <span class="filter-tag c-red"   data-group="ownership" data-value="third-party" onclick="toggleTag(this)">Third-Party <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">Publisher</span>
+            <span class="filter-tag c-green" data-group="publisher" data-value="verified"   onclick="toggleTag(this)">Verified <span class="cnt"></span></span>
+            <span class="filter-tag c-gray"  data-group="publisher" data-value="unverified" onclick="toggleTag(this)">Unverified <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">Enabled</span>
+            <span class="filter-tag c-green" data-group="enabled" data-value="yes" onclick="toggleTag(this)">Enabled <span class="cnt"></span></span>
+            <span class="filter-tag c-gray"  data-group="enabled" data-value="no"  onclick="toggleTag(this)">Disabled <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">Risk Level</span>
+            <span class="filter-tag c-red"    data-group="risk" data-value="Critical" onclick="toggleTag(this)">Critical <span class="cnt"></span></span>
+            <span class="filter-tag c-orange" data-group="risk" data-value="High"     onclick="toggleTag(this)">High <span class="cnt"></span></span>
+            <span class="filter-tag c-amber"  data-group="risk" data-value="Medium"   onclick="toggleTag(this)">Medium <span class="cnt"></span></span>
+            <span class="filter-tag c-green"  data-group="risk" data-value="Low"      onclick="toggleTag(this)">Low <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">App Registration</span>
+            <span class="filter-tag c-green" data-group="appreg" data-value="yes" onclick="toggleTag(this)">Yes <span class="cnt"></span></span>
+            <span class="filter-tag c-gray" data-group="appreg" data-value="no"  onclick="toggleTag(this)">No <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">Assignment</span>
+            <span class="filter-tag c-green" data-group="assignment" data-value="required"     onclick="toggleTag(this)">Required <span class="cnt"></span></span>
+            <span class="filter-tag c-gray" data-group="assignment" data-value="not-required" onclick="toggleTag(this)">Open Access <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">Owners</span>
+            <span class="filter-tag c-green" data-group="owners" data-value="has"      onclick="toggleTag(this)">Has Owners <span class="cnt"></span></span>
+            <span class="filter-tag c-gray" data-group="owners" data-value="noowners" onclick="toggleTag(this)">No Owners <span class="cnt"></span></span>
+            <span class="filter-tag c-amber" data-group="owners" data-value="gap"     onclick="toggleTag(this)">Ownership Gap <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">Permissions</span>
+            <span class="filter-tag c-red"    data-group="permissions" data-value="application" onclick="toggleTag(this)">Application <span class="cnt"></span></span>
+            <span class="filter-tag c-blue"   data-group="permissions" data-value="delegated"   onclick="toggleTag(this)">Delegated <span class="cnt"></span></span>
+            <span class="filter-tag c-purple" data-group="permissions" data-value="roles"       onclick="toggleTag(this)">Roles <span class="cnt"></span></span>
+            <span class="filter-tag c-gray"   data-group="permissions" data-value="none"        onclick="toggleTag(this)">None <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">Credentials</span>
+            <span class="filter-tag c-green" data-group="credentials" data-value="certs"    onclick="toggleTag(this)">Has Certs <span class="cnt"></span></span>
+            <span class="filter-tag c-amber"  data-group="credentials" data-value="secrets"  onclick="toggleTag(this)">Has Secrets <span class="cnt"></span></span>
+            <span class="filter-tag c-orange" data-group="credentials" data-value="expiring" onclick="toggleTag(this)">Expiring <span class="cnt"></span></span>
+            <span class="filter-tag c-red"    data-group="credentials" data-value="expired"  onclick="toggleTag(this)">Expired <span class="cnt"></span></span>
+        </div>
+
+        <div class="filter-results">
+            <span id="resultCount" class="result-count"></span>
+            <span id="activeChips" class="active-chips"></span>
+            <button id="clearAll" class="clear-all" onclick="clearAllFilters()" style="display:none;">Clear all</button>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+    <table id="reportTable">
+        <thead>
+            <tr>
+                <th onclick="sortTable('reportTable', 0, 'string')">Application Name</th>
+                <th onclick="sortTable('reportTable', 1, 'string')">Enabled</th>
+                <th onclick="sortTable('reportTable', 2, 'string')">App ID</th>
+                <th onclick="sortTable('reportTable', 3, 'string')">App Ownership</th>
+                <th onclick="sortTable('reportTable', 4, 'string')">Has App Registration</th>
+                <th onclick="sortTable('reportTable', 5, 'string')">Assignment Required</th>
+                <th onclick="sortTable('reportTable', 6, 'string')">Owners</th>
+                <th onclick="sortTable('reportTable', 7, 'string')">Risk Level</th>
+                <th>Permissions</th>
+                <th onclick="sortTable('reportTable', 9, 'string')">Credentials</th>
+            </tr>
+        </thead>
+        <tbody>            <tr class="risk-critical" data-name="Contoso Automation Runner" data-appid="a1a1a1a1-0000-0000-0000-000000000001" data-ownertext="Alice Admin alice@contoso.com User Bob Builder bob@contoso.com User" data-permtext="Application Directory.ReadWrite.All Microsoft Graph Application Mail.Read Microsoft Graph Delegated User.Read Microsoft Graph" data-risk="Critical" data-appreg="yes" data-apppermcount="2" data-delegatedpermcount="1" data-rolecount="0" data-hascerts="no" data-hassecrets="yes" data-expiring="yes" data-expired="yes" data-owners="yes" data-ownershipgap="yes" data-ownership="internal" data-verifiedpublisher="na" data-assignment="not-required" data-enabled="yes">
+                <td><a class="app-name" href="https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/sp-0000-0000-0000-000000000001/appId/a1a1a1a1-0000-0000-0000-000000000001" target="_blank" title="Open in Entra portal">Contoso Automation Runner</a></td>
+                <td class="app-enabled"><span class='badge green clickable-badge' data-fg='enabled' data-fv='yes' title='Users can sign in and the application is active in this tenant'>Yes</span></td>
+                <td><code class="mono">a1a1a1a1-0000-0000-0000-000000000001</code></td>
+                <td class="internal-app"><span class='badge green' onclick="openDetailModal(reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].ownershipTitle,reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].ownershipHtml)" style='cursor:pointer' title='App registered in this tenant and owned by your organization'>Internal</span></td>
+                <td class="has-app-reg"><span class='badge green clickable-badge' data-fg='appreg' data-fv='yes' title='This service principal has a linked App Registration in this tenant'>Yes</span></td>
+                <td class="assignment-not-required"><span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='All users in the tenant can access this app without explicit assignment'>No</span></td>
+                <td class="ownership-gap cell-sm"><span class="perm-badges"><span class='badge blue' onclick="openDetailModal(reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].ownersTitle,reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].ownersHtml)" style='cursor:pointer' title='Users or service principals responsible for managing this app — click to view details'>2 owner(s)</span> <span class='badge amber' onclick="openDetailModal(reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].ownershipGapTitle,reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].ownershipGapHtml)" style='cursor:pointer' title='Not all owners are assigned to both the Service Principal and the App Registration — click to view details'>Ownership Gap</span></span></td>
+                <td class="cell-sm"><span class='badge red' onclick="openDetailModal(reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].riskTitle,reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].riskHtml)" style='cursor:pointer' title='Critical risk. Immediate review required. This app has a combination of high privilege permissions, active credentials and missing controls'>Critical</span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge orange' onclick="openDetailModal(reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].appPermsTitle,reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].appPermsHtml)" style='cursor:pointer' title='Application permissions grant access without a signed-in user and are typically high privilege'>App: 2</span> <span class='badge blue' onclick="openDetailModal(reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].delegatedPermsTitle,reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].delegatedPermsHtml)" style='cursor:pointer' title='Delegated permissions act on behalf of a signed-in user'>Delegated: 1</span> <span class='badge gray'>Roles: 0</span></span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge gray' title='No active certificates'>Certs: 0</span> <span class='badge amber' onclick="openDetailModal(reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].secretsTitle,reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].secretsHtml)" style='cursor:pointer' title='Active client secret credentials — click to view details'>Secrets: 2</span> <span class='badge orange' onclick="openDetailModal(reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].expiringTitle,reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].expiringHtml)" style='cursor:pointer' title='Credentials expiring within 30 days. Renew them to avoid authentication failures — click to view details'>Expiring: 1</span> <span class='badge red' onclick="openDetailModal(reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].expiredTitle,reportDetails['a1a1a1a1-0000-0000-0000-000000000001'].expiredHtml)" style='cursor:pointer' title='Credentials that have already expired and should be removed or renewed — click to view details'>Expired: 1</span></span></td>
+            </tr>            <tr class="risk-high" data-name="Acme SaaS Connector" data-appid="b2b2b2b2-0000-0000-0000-000000000003" data-ownertext="Carol Cloud carol@contoso.com User" data-permtext="Application Sites.Read.All SharePoint Delegated Files.ReadWrite.All Microsoft Graph Directory Role Application Administrator Entra ID" data-risk="High" data-appreg="no" data-apppermcount="1" data-delegatedpermcount="1" data-rolecount="1" data-hascerts="yes" data-hassecrets="no" data-expiring="no" data-expired="no" data-owners="yes" data-ownershipgap="no" data-ownership="third-party" data-verifiedpublisher="verified" data-assignment="required" data-enabled="yes">
+                <td><a class="app-name" href="https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/sp-0000-0000-0000-000000000003/appId/b2b2b2b2-0000-0000-0000-000000000003" target="_blank" title="Open in Entra portal">Acme SaaS Connector</a></td>
+                <td class="app-enabled"><span class='badge green clickable-badge' data-fg='enabled' data-fv='yes' title='Users can sign in and the application is active in this tenant'>Yes</span></td>
+                <td><code class="mono">b2b2b2b2-0000-0000-0000-000000000003</code></td>
+                <td class="external-app"><span class='badge orange' onclick="openDetailModal(reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].ownershipTitle,reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].ownershipHtml)" style='cursor:pointer' title='App registered in another tenant. This is a third party service'>Third-Party</span><div style='margin-top:4px'><span class='badge green' onclick="openDetailModal(reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].ownershipTitle,reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].ownershipHtml)" style='cursor:pointer' title='Microsoft-verified publisher: Acme Corporation. Click to view details'>Verified Publisher</span></div></td>
+                <td class="sp-only"><span class='badge gray clickable-badge' data-fg='appreg' data-fv='no' title='Service principal only with no App Registration found in this tenant'>No</span></td>
+                <td class="assignment-required"><span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Users and groups must be explicitly assigned to access this app'>Yes</span></td>
+                <td class="has-owners cell-sm"><span class="perm-badges"><span class='badge blue' onclick="openDetailModal(reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].ownersTitle,reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].ownersHtml)" style='cursor:pointer' title='Users or service principals responsible for managing this app — click to view details'>1 owner(s)</span> </span></td>
+                <td class="cell-sm"><span class='badge orange' onclick="openDetailModal(reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].riskTitle,reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].riskHtml)" style='cursor:pointer' title='High risk. This app has elevated permissions or missing security controls that should be reviewed'>High</span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge orange' onclick="openDetailModal(reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].appPermsTitle,reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].appPermsHtml)" style='cursor:pointer' title='Application permissions grant access without a signed-in user and are typically high privilege'>App: 1</span> <span class='badge blue' onclick="openDetailModal(reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].delegatedPermsTitle,reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].delegatedPermsHtml)" style='cursor:pointer' title='Delegated permissions act on behalf of a signed-in user'>Delegated: 1</span> <span class='badge red' onclick="openDetailModal(reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].rolePermsTitle,reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].rolePermsHtml)" style='cursor:pointer' title='App has been assigned Entra ID directory roles which grant broad administrative capabilities'>Roles: 1</span></span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge green' onclick="openDetailModal(reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].certsTitle,reportDetails['b2b2b2b2-0000-0000-0000-000000000003'].certsHtml)" style='cursor:pointer' title='Active certificate credentials — click to view details'>Certs: 1</span> <span class='badge gray' title='No active secrets'>Secrets: 0</span></span></td>
+            </tr>            <tr class="risk-medium" data-name="Reporting Data Sync" data-appid="e5e5e5e5-0000-0000-0000-000000000006" data-ownertext="" data-permtext="Application Reports.Read.All Microsoft Graph Application AuditLog.Read.All Microsoft Graph" data-risk="Medium" data-appreg="yes" data-apppermcount="2" data-delegatedpermcount="0" data-rolecount="0" data-hascerts="no" data-hassecrets="yes" data-expiring="no" data-expired="no" data-owners="no" data-ownershipgap="no" data-ownership="internal" data-verifiedpublisher="na" data-assignment="required" data-enabled="yes">
+                <td><a class="app-name" href="https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/sp-0000-0000-0000-000000000006/appId/e5e5e5e5-0000-0000-0000-000000000006" target="_blank" title="Open in Entra portal">Reporting Data Sync</a></td>
+                <td class="app-enabled"><span class='badge green clickable-badge' data-fg='enabled' data-fv='yes' title='Users can sign in and the application is active in this tenant'>Yes</span></td>
+                <td><code class="mono">e5e5e5e5-0000-0000-0000-000000000006</code></td>
+                <td class="internal-app"><span class='badge green' onclick="openDetailModal(reportDetails['e5e5e5e5-0000-0000-0000-000000000006'].ownershipTitle,reportDetails['e5e5e5e5-0000-0000-0000-000000000006'].ownershipHtml)" style='cursor:pointer' title='App registered in this tenant and owned by your organization'>Internal</span></td>
+                <td class="has-app-reg"><span class='badge green clickable-badge' data-fg='appreg' data-fv='yes' title='This service principal has a linked App Registration in this tenant'>Yes</span></td>
+                <td class="assignment-required"><span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Users and groups must be explicitly assigned to access this app'>Yes</span></td>
+                <td class="no-owners cell-sm"><span class="perm-badges"><span class='badge gray' title='No owner is assigned. Changes can only be made by a privileged administrator'>No owners</span></span></td>
+                <td class="cell-sm"><span class='badge amber' onclick="openDetailModal(reportDetails['e5e5e5e5-0000-0000-0000-000000000006'].riskTitle,reportDetails['e5e5e5e5-0000-0000-0000-000000000006'].riskHtml)" style='cursor:pointer' title='Medium risk. Some risk factors are present. Review the risk analysis for details'>Medium</span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge orange' onclick="openDetailModal(reportDetails['e5e5e5e5-0000-0000-0000-000000000006'].appPermsTitle,reportDetails['e5e5e5e5-0000-0000-0000-000000000006'].appPermsHtml)" style='cursor:pointer' title='Application permissions grant access without a signed-in user and are typically high privilege'>App: 2</span> <span class='badge gray'>Delegated: 0</span> <span class='badge gray'>Roles: 0</span></span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge gray' title='No active certificates'>Certs: 0</span> <span class='badge amber' onclick="openDetailModal(reportDetails['e5e5e5e5-0000-0000-0000-000000000006'].secretsTitle,reportDetails['e5e5e5e5-0000-0000-0000-000000000006'].secretsHtml)" style='cursor:pointer' title='Active client secret credentials — click to view details'>Secrets: 1</span></span></td>
+            </tr>            <tr class="risk-medium" data-name="QuickForms Free" data-appid="c3c3c3c3-0000-0000-0000-000000000004" data-ownertext="" data-permtext="Delegated openid Microsoft Graph" data-risk="Medium" data-appreg="no" data-apppermcount="0" data-delegatedpermcount="1" data-rolecount="0" data-hascerts="no" data-hassecrets="no" data-expiring="no" data-expired="no" data-owners="no" data-ownershipgap="no" data-ownership="third-party" data-verifiedpublisher="unverified" data-assignment="not-required" data-enabled="yes">
+                <td><a class="app-name" href="https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/sp-0000-0000-0000-000000000004/appId/c3c3c3c3-0000-0000-0000-000000000004" target="_blank" title="Open in Entra portal">QuickForms Free</a></td>
+                <td class="app-enabled"><span class='badge green clickable-badge' data-fg='enabled' data-fv='yes' title='Users can sign in and the application is active in this tenant'>Yes</span></td>
+                <td><code class="mono">c3c3c3c3-0000-0000-0000-000000000004</code></td>
+                <td class="external-app"><span class='badge orange' onclick="openDetailModal(reportDetails['c3c3c3c3-0000-0000-0000-000000000004'].ownershipTitle,reportDetails['c3c3c3c3-0000-0000-0000-000000000004'].ownershipHtml)" style='cursor:pointer' title='App registered in another tenant. This is a third party service'>Third-Party</span><div style='margin-top:4px'><span class='badge red' onclick="openDetailModal(reportDetails['c3c3c3c3-0000-0000-0000-000000000004'].ownershipTitle,reportDetails['c3c3c3c3-0000-0000-0000-000000000004'].ownershipHtml)" style='cursor:pointer' title='No Microsoft-verified publisher. The developer identity behind this app has not been verified. Click to view details'>Unverified Publisher</span></div></td>
+                <td class="sp-only"><span class='badge gray clickable-badge' data-fg='appreg' data-fv='no' title='Service principal only with no App Registration found in this tenant'>No</span></td>
+                <td class="assignment-not-required"><span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='All users in the tenant can access this app without explicit assignment'>No</span></td>
+                <td class="no-owners cell-sm"><span class="perm-badges"><span class='badge gray' title='No owner is assigned. Changes can only be made by a privileged administrator'>No owners</span></span></td>
+                <td class="cell-sm"><span class='badge amber' onclick="openDetailModal(reportDetails['c3c3c3c3-0000-0000-0000-000000000004'].riskTitle,reportDetails['c3c3c3c3-0000-0000-0000-000000000004'].riskHtml)" style='cursor:pointer' title='Medium risk. Some risk factors are present. Review the risk analysis for details'>Medium</span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge gray'>App: 0</span> <span class='badge blue' onclick="openDetailModal(reportDetails['c3c3c3c3-0000-0000-0000-000000000004'].delegatedPermsTitle,reportDetails['c3c3c3c3-0000-0000-0000-000000000004'].delegatedPermsHtml)" style='cursor:pointer' title='Delegated permissions act on behalf of a signed-in user'>Delegated: 1</span> <span class='badge gray'>Roles: 0</span></span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge gray' title='No active certificates'>Certs: 0</span> <span class='badge gray' title='No active secrets'>Secrets: 0</span></span></td>
+            </tr>            <tr class="risk-low" data-name="Microsoft Graph Command Line Tools" data-appid="14d82eec-204b-4c2f-b7e8-296a70dab67e" data-ownertext="" data-permtext="Delegated User.Read Microsoft Graph" data-risk="Low" data-appreg="no" data-apppermcount="0" data-delegatedpermcount="1" data-rolecount="0" data-hascerts="no" data-hassecrets="no" data-expiring="no" data-expired="no" data-owners="no" data-ownershipgap="no" data-ownership="microsoft" data-verifiedpublisher="na" data-assignment="not-required" data-enabled="yes">
+                <td><a class="app-name" href="https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/sp-0000-0000-0000-000000000002/appId/14d82eec-204b-4c2f-b7e8-296a70dab67e" target="_blank" title="Open in Entra portal">Microsoft Graph Command Line Tools</a></td>
+                <td class="app-enabled"><span class='badge green clickable-badge' data-fg='enabled' data-fv='yes' title='Users can sign in and the application is active in this tenant'>Yes</span></td>
+                <td><code class="mono">14d82eec-204b-4c2f-b7e8-296a70dab67e</code></td>
+                <td class="microsoft-app"><span class='badge blue' onclick="openDetailModal(reportDetails['14d82eec-204b-4c2f-b7e8-296a70dab67e'].ownershipTitle,reportDetails['14d82eec-204b-4c2f-b7e8-296a70dab67e'].ownershipHtml)" style='cursor:pointer' title='App owned by Microsoft. This is a first party Microsoft service'>Microsoft</span></td>
+                <td class="sp-only"><span class='badge gray clickable-badge' data-fg='appreg' data-fv='no' title='Service principal only with no App Registration found in this tenant'>No</span></td>
+                <td class="assignment-not-required"><span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='All users in the tenant can access this app without explicit assignment'>No</span></td>
+                <td class="no-owners cell-sm"><span class="perm-badges"><span class='badge gray' title='No owner is assigned. Changes can only be made by a privileged administrator'>No owners</span></span></td>
+                <td class="cell-sm"><span class='badge green' title='Low risk. No significant security concerns detected at this time'>Low</span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge gray'>App: 0</span> <span class='badge blue' onclick="openDetailModal(reportDetails['14d82eec-204b-4c2f-b7e8-296a70dab67e'].delegatedPermsTitle,reportDetails['14d82eec-204b-4c2f-b7e8-296a70dab67e'].delegatedPermsHtml)" style='cursor:pointer' title='Delegated permissions act on behalf of a signed-in user'>Delegated: 1</span> <span class='badge gray'>Roles: 0</span></span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge gray' title='No active certificates'>Certs: 0</span> <span class='badge gray' title='No active secrets'>Secrets: 0</span></span></td>
+            </tr>            <tr class="risk-low" data-name="Legacy Intranet Portal" data-appid="d4d4d4d4-0000-0000-0000-000000000005" data-ownertext="Dave DevOps dave@contoso.com User Automation SP svc-legacy@contoso.com ServicePrincipal" data-permtext="" data-risk="Low" data-appreg="yes" data-apppermcount="0" data-delegatedpermcount="0" data-rolecount="0" data-hascerts="yes" data-hassecrets="no" data-expiring="no" data-expired="no" data-owners="yes" data-ownershipgap="no" data-ownership="internal" data-verifiedpublisher="na" data-assignment="required" data-enabled="no">
+                <td><a class="app-name" href="https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/sp-0000-0000-0000-000000000005/appId/d4d4d4d4-0000-0000-0000-000000000005" target="_blank" title="Open in Entra portal">Legacy Intranet Portal</a></td>
+                <td class="app-disabled"><span class='badge gray clickable-badge' data-fg='enabled' data-fv='no' title='User sign-in is blocked for this application. It is visible in the tenant but cannot be used'>No</span></td>
+                <td><code class="mono">d4d4d4d4-0000-0000-0000-000000000005</code></td>
+                <td class="internal-app"><span class='badge green' onclick="openDetailModal(reportDetails['d4d4d4d4-0000-0000-0000-000000000005'].ownershipTitle,reportDetails['d4d4d4d4-0000-0000-0000-000000000005'].ownershipHtml)" style='cursor:pointer' title='App registered in this tenant and owned by your organization'>Internal</span></td>
+                <td class="has-app-reg"><span class='badge green clickable-badge' data-fg='appreg' data-fv='yes' title='This service principal has a linked App Registration in this tenant'>Yes</span></td>
+                <td class="assignment-required"><span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Users and groups must be explicitly assigned to access this app'>Yes</span></td>
+                <td class="has-owners cell-sm"><span class="perm-badges"><span class='badge blue' onclick="openDetailModal(reportDetails['d4d4d4d4-0000-0000-0000-000000000005'].ownersTitle,reportDetails['d4d4d4d4-0000-0000-0000-000000000005'].ownersHtml)" style='cursor:pointer' title='Users or service principals responsible for managing this app — click to view details'>2 owner(s)</span> </span></td>
+                <td class="cell-sm"><span class='badge green' onclick="openDetailModal(reportDetails['d4d4d4d4-0000-0000-0000-000000000005'].riskTitle,reportDetails['d4d4d4d4-0000-0000-0000-000000000005'].riskHtml)" style='cursor:pointer' title='Low risk. No significant security concerns detected at this time'>Low</span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge gray'>App: 0</span> <span class='badge gray'>Delegated: 0</span> <span class='badge gray'>Roles: 0</span></span></td>
+                <td class="cell-sm"><span class="perm-badges"><span class='badge green' onclick="openDetailModal(reportDetails['d4d4d4d4-0000-0000-0000-000000000005'].certsTitle,reportDetails['d4d4d4d4-0000-0000-0000-000000000005'].certsHtml)" style='cursor:pointer' title='Active certificate credentials — click to view details'>Certs: 1</span> <span class='badge gray' title='No active secrets'>Secrets: 0</span></span></td>
+            </tr>        </tbody>
+    </table>
+    </div>
+
+    <script>
+        const reportDetails = {
+"a1a1a1a1-0000-0000-0000-000000000001": { appPermsTitle: "Application Permissions for Contoso Automation Runner (2)", appPermsHtml: "<div class='permission-item app-permission'><strong>[Application]<\/strong> <a href='https://graphpermissions.merill.net/permission/Directory.ReadWrite.All' target='_blank' title='View Directory.ReadWrite.All on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>Directory.ReadWrite.All<\/a> on <em>Microsoft Graph<\/em><\/div><div class='permission-item app-permission'><strong>[Application]<\/strong> <a href='https://graphpermissions.merill.net/permission/Mail.Read' target='_blank' title='View Mail.Read on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>Mail.Read<\/a> on <em>Microsoft Graph<\/em><\/div>", delegatedPermsTitle: "Delegated Permissions for Contoso Automation Runner (1)", delegatedPermsHtml: "<div class='permission-item delegated-permission'><strong>[Delegated]<\/strong> <a href='https://graphpermissions.merill.net/permission/User.Read' target='_blank' title='View User.Read on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>User.Read<\/a> on <em>Microsoft Graph<\/em><\/div>", rolePermsTitle: "Directory Roles for Contoso Automation Runner (0)", rolePermsHtml: "No directory roles assigned", riskTitle: "Risk Analysis for Contoso Automation Runner (5 factors)", riskHtml: "<div class='risk-score-header'><div><div class='risk-score-label'>Total Risk Score<\/div><div class='risk-score-value'>120<\/div><\/div><span class='badge red'>Critical<\/span><\/div><ul style='margin:5px 0; padding-left: 4px; list-style:none'><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+15<\/span><\/span><span>High-risk permission: <a href='https://graphpermissions.merill.net/permission/Directory.ReadWrite.All' target='_blank' title='View Directory.ReadWrite.All on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>Directory.ReadWrite.All<\/a><\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>Assignment not required<\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>Uses password secrets (certificates preferred)<\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>Multiple secrets configured (2) - reduces auditability<\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+1<\/span><\/span><span>Ownership gap - owners differ between Service Principal and App Registration<\/span><\/li><\/ul><div class='risk-scale-wrap'><div class='risk-scale-marker' style='left:100%'><span class='risk-scale-marker-value'>120 pts<\/span><span class='risk-scale-arrow'><\/span><\/div><div class='risk-scale-bar'><div class='risk-scale-seg low' style='width:23.08%' title='Low: 0-14 pts'><\/div><div class='risk-scale-seg medium' style='width:30.77%' title='Medium: 15-34 pts'><\/div><div class='risk-scale-seg high' style='width:23.08%' title='High: 35-49 pts'><\/div><div class='risk-scale-seg critical' style='width:23.08%' title='Critical: 50+ pts'><\/div><\/div><div class='risk-scale-labels'><span class='risk-scale-tick' style='left:0%'>0<\/span><span class='risk-scale-tick' style='left:23.08%;transform:translateX(-50%)'>15<\/span><span class='risk-scale-tick' style='left:53.85%;transform:translateX(-50%)'>35<\/span><span class='risk-scale-tick' style='left:76.93%;transform:translateX(-50%)'>50<\/span><span class='risk-scale-tick' style='left:100%;transform:translateX(-100%)'>65+<\/span><\/div><\/div>", certsTitle: "Certificates for Contoso Automation Runner (0 active)", certsHtml: "No active certificates", secretsTitle: "Client Secrets for Contoso Automation Runner (2 active)", secretsHtml: "<table id='secretsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=\"sortTable('secretsModalTable',0,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name<\/th><th onclick=\"sortTable('secretsModalTable',1,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start<\/th><th onclick=\"sortTable('secretsModalTable',2,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires<\/th><th onclick=\"sortTable('secretsModalTable',3,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>CI Pipeline Secret<\/td><td style='padding:4px 8px'>2025-09-11<\/td><td style='padding:4px 8px' class='expiring-date'>2026-07-28<\/td><td style='padding:4px 8px'><code>key-1111<\/code><\/td><\/tr><tr><td style='padding:4px 8px'>Legacy Secret<\/td><td style='padding:4px 8px'>2024-08-07<\/td><td style='padding:4px 8px' class='expired-date'>2026-07-03<\/td><td style='padding:4px 8px'><code>key-1112<\/code><\/td><\/tr><\/tbody><\/table>", expiringTitle: "Expiring Credentials for Contoso Automation Runner (1)", expiringHtml: "<table id='expiringModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=\"sortTable('expiringModalTable',0,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type<\/th><th onclick=\"sortTable('expiringModalTable',1,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name<\/th><th onclick=\"sortTable('expiringModalTable',2,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start<\/th><th onclick=\"sortTable('expiringModalTable',3,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires<\/th><th onclick=\"sortTable('expiringModalTable',4,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Secret<\/td><td style='padding:4px 8px'>CI Pipeline Secret<\/td><td style='padding:4px 8px'>2025-09-11<\/td><td style='padding:4px 8px' class='expiring-date'>2026-07-28<\/td><td style='padding:4px 8px'><code>key-1111<\/code><\/td><\/tr><\/tbody><\/table>", expiredTitle: "Expired Credentials for Contoso Automation Runner (1)", expiredHtml: "<table id='expiredModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=\"sortTable('expiredModalTable',0,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type<\/th><th onclick=\"sortTable('expiredModalTable',1,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name<\/th><th onclick=\"sortTable('expiredModalTable',2,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start<\/th><th onclick=\"sortTable('expiredModalTable',3,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires<\/th><th onclick=\"sortTable('expiredModalTable',4,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Secret<\/td><td style='padding:4px 8px'>Legacy Secret<\/td><td style='padding:4px 8px'>2024-08-07<\/td><td style='padding:4px 8px' class='expired-date'>2026-07-03<\/td><td style='padding:4px 8px'><code>key-1112<\/code><\/td><\/tr><\/tbody><\/table>", ownershipTitle: "App Ownership for Contoso Automation Runner", ownershipHtml: "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type<\/td><td style='padding:6px 8px'>Internal (registered in this tenant)<\/td><\/tr><tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID<\/td><td style='padding:6px 8px'><code>11111111-2222-3333-4444-555555555555<\/code><\/td><\/tr><\/tbody><\/table>", ownersTitle: "Owners for Contoso Automation Runner (2 total)", ownersHtml: "<table id='ownersModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=\"sortTable('ownersModalTable',0,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name<\/th><th onclick=\"sortTable('ownersModalTable',1,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type<\/th><th onclick=\"sortTable('ownersModalTable',2,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID<\/th><th onclick=\"sortTable('ownersModalTable',3,'string')\" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App<\/th><th onclick=\"sortTable('ownersModalTable',4,'string')\" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Alice Admin<\/td><td style='padding:4px 8px'>User<\/td><td style='padding:4px 8px'><small>alice@contoso.com<\/small><\/td><td style='padding:4px 8px;text-align:center'>&#10003;<\/td><td style='padding:4px 8px;text-align:center'>&#8212;<\/td><\/tr><tr><td style='padding:4px 8px'>Bob Builder<\/td><td style='padding:4px 8px'>User<\/td><td style='padding:4px 8px'><small>bob@contoso.com<\/small><\/td><td style='padding:4px 8px;text-align:center'>&#10003;<\/td><td style='padding:4px 8px;text-align:center'>&#10003;<\/td><\/tr><\/tbody><\/table>", ownershipGapTitle: "Ownership Gap for  Contoso Automation Runner", ownershipGapHtml: "<p style='margin:0 0 10px 0;font-size:13px'>Owners not assigned to both the Enterprise App and the App Registration:<\/p><table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name<\/th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type<\/th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID<\/th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Assigned To<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Alice Admin<\/td><td style='padding:4px 8px'>User<\/td><td style='padding:4px 8px'><small>alice@contoso.com<\/small><\/td><td style='padding:4px 8px'>Enterprise App only<\/td><\/tr><\/tbody><\/table>" },
+"b2b2b2b2-0000-0000-0000-000000000003": { appPermsTitle: "Application Permissions for Acme SaaS Connector (1)", appPermsHtml: "<div class='permission-item app-permission'><strong>[Application]<\/strong> <a href='https://graphpermissions.merill.net/permission/Sites.Read.All' target='_blank' title='View Sites.Read.All on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>Sites.Read.All<\/a> on <em>SharePoint<\/em><\/div>", delegatedPermsTitle: "Delegated Permissions for Acme SaaS Connector (1)", delegatedPermsHtml: "<div class='permission-item delegated-permission'><strong>[Delegated]<\/strong> <a href='https://graphpermissions.merill.net/permission/Files.ReadWrite.All' target='_blank' title='View Files.ReadWrite.All on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>Files.ReadWrite.All<\/a> on <em>Microsoft Graph<\/em><\/div>", rolePermsTitle: "Directory Roles for Acme SaaS Connector (1)", rolePermsHtml: "<div class='permission-item directory-role'><strong>[Directory Role]<\/strong> <a href='https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#application-administrator' target='_blank' title='View Application Administrator on Microsoft Learn' style='color:inherit;text-decoration:underline dotted;'>Application Administrator<\/a> on <em>Entra ID<\/em><\/div>", riskTitle: "Risk Analysis for Acme SaaS Connector (3 factors)", riskHtml: "<div class='risk-score-header'><div><div class='risk-score-label'>Total Risk Score<\/div><div class='risk-score-value'>35<\/div><\/div><span class='badge orange'>High<\/span><\/div><ul style='margin:5px 0; padding-left: 4px; list-style:none'><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+15<\/span><\/span><span>High-risk directory role: <a href='https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#application-administrator' target='_blank' title='View Application Administrator on Microsoft Learn' style='color:inherit;text-decoration:underline dotted;'>Application Administrator<\/a><\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>Has application permissions<\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>External application registered in another tenant<\/span><\/li><\/ul><div class='risk-scale-wrap'><div class='risk-scale-marker' style='left:53.8%'><span class='risk-scale-marker-value'>35 pts<\/span><span class='risk-scale-arrow'><\/span><\/div><div class='risk-scale-bar'><div class='risk-scale-seg low' style='width:23.08%' title='Low: 0-14 pts'><\/div><div class='risk-scale-seg medium' style='width:30.77%' title='Medium: 15-34 pts'><\/div><div class='risk-scale-seg high' style='width:23.08%' title='High: 35-49 pts'><\/div><div class='risk-scale-seg critical' style='width:23.08%' title='Critical: 50+ pts'><\/div><\/div><div class='risk-scale-labels'><span class='risk-scale-tick' style='left:0%'>0<\/span><span class='risk-scale-tick' style='left:23.08%;transform:translateX(-50%)'>15<\/span><span class='risk-scale-tick' style='left:53.85%;transform:translateX(-50%)'>35<\/span><span class='risk-scale-tick' style='left:76.93%;transform:translateX(-50%)'>50<\/span><span class='risk-scale-tick' style='left:100%;transform:translateX(-100%)'>65+<\/span><\/div><\/div>", certsTitle: "Certificates for Acme SaaS Connector (1 active)", certsHtml: "<table id='certsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=\"sortTable('certsModalTable',0,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name<\/th><th onclick=\"sortTable('certsModalTable',1,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start<\/th><th onclick=\"sortTable('certsModalTable',2,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires<\/th><th onclick=\"sortTable('certsModalTable',3,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Acme Signing Cert<\/td><td style='padding:4px 8px'>2026-06-08<\/td><td style='padding:4px 8px' class=''>2027-08-12<\/td><td style='padding:4px 8px'><code>cert-3331<\/code><\/td><\/tr><\/tbody><\/table>", secretsTitle: "Client Secrets for Acme SaaS Connector (0 active)", secretsHtml: "No active secrets", expiringTitle: "Expiring Credentials for Acme SaaS Connector (0)", expiringHtml: "No credentials expiring within 30 days", expiredTitle: "Expired Credentials for Acme SaaS Connector (0)", expiredHtml: "No expired credentials", ownershipTitle: "App Ownership for Acme SaaS Connector", ownershipHtml: "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type<\/td><td style='padding:6px 8px'>Third-Party (registered in external tenant)<\/td><\/tr><tr><td style='padding:6px 8px;font-weight:bold'>Publisher<\/td><td style='padding:6px 8px'><span style='color:var(--good);font-weight:600'>Verified<\/span> - Acme Corporation<\/td><\/tr><tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID<\/td><td style='padding:6px 8px'><code>99999999-8888-7777-6666-555555555555<\/code><\/td><\/tr><\/tbody><\/table>", ownersTitle: "Owners for Acme SaaS Connector (1 total)", ownersHtml: "<table id='ownersModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=\"sortTable('ownersModalTable',0,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name<\/th><th onclick=\"sortTable('ownersModalTable',1,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type<\/th><th onclick=\"sortTable('ownersModalTable',2,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID<\/th><th onclick=\"sortTable('ownersModalTable',3,'string')\" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App<\/th><th onclick=\"sortTable('ownersModalTable',4,'string')\" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Carol Cloud<\/td><td style='padding:4px 8px'>User<\/td><td style='padding:4px 8px'><small>carol@contoso.com<\/small><\/td><td style='padding:4px 8px;text-align:center'>&#10003;<\/td><td style='padding:4px 8px;text-align:center'>&#8212;<\/td><\/tr><\/tbody><\/table>", ownershipGapTitle: "Ownership Gap for  Acme SaaS Connector", ownershipGapHtml: "<p style='margin:0 0 10px 0;font-size:13px'>Owners not assigned to both the Enterprise App and the App Registration:<\/p><table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name<\/th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type<\/th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID<\/th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Assigned To<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Carol Cloud<\/td><td style='padding:4px 8px'>User<\/td><td style='padding:4px 8px'><small>carol@contoso.com<\/small><\/td><td style='padding:4px 8px'>Enterprise App only<\/td><\/tr><\/tbody><\/table>" },
+"e5e5e5e5-0000-0000-0000-000000000006": { appPermsTitle: "Application Permissions for Reporting Data Sync (2)", appPermsHtml: "<div class='permission-item app-permission'><strong>[Application]<\/strong> <a href='https://graphpermissions.merill.net/permission/Reports.Read.All' target='_blank' title='View Reports.Read.All on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>Reports.Read.All<\/a> on <em>Microsoft Graph<\/em><\/div><div class='permission-item app-permission'><strong>[Application]<\/strong> <a href='https://graphpermissions.merill.net/permission/AuditLog.Read.All' target='_blank' title='View AuditLog.Read.All on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>AuditLog.Read.All<\/a> on <em>Microsoft Graph<\/em><\/div>", delegatedPermsTitle: "Delegated Permissions for Reporting Data Sync (0)", delegatedPermsHtml: "No delegated permissions assigned", rolePermsTitle: "Directory Roles for Reporting Data Sync (0)", rolePermsHtml: "No directory roles assigned", riskTitle: "Risk Analysis for Reporting Data Sync (4 factors)", riskHtml: "<div class='risk-score-header'><div><div class='risk-score-label'>Total Risk Score<\/div><div class='risk-score-value'>22<\/div><\/div><span class='badge amber'>Medium<\/span><\/div><ul style='margin:5px 0; padding-left: 4px; list-style:none'><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>Has application permissions<\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>Uses password secrets (certificates preferred)<\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>Long-lived credentials (expiry &gt; 1 year)<\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+4<\/span><\/span><span>No owners assigned (neither Service Principal nor App Registration)<\/span><\/li><\/ul><div class='risk-scale-wrap'><div class='risk-scale-marker' style='left:33.8%'><span class='risk-scale-marker-value'>22 pts<\/span><span class='risk-scale-arrow'><\/span><\/div><div class='risk-scale-bar'><div class='risk-scale-seg low' style='width:23.08%' title='Low: 0-14 pts'><\/div><div class='risk-scale-seg medium' style='width:30.77%' title='Medium: 15-34 pts'><\/div><div class='risk-scale-seg high' style='width:23.08%' title='High: 35-49 pts'><\/div><div class='risk-scale-seg critical' style='width:23.08%' title='Critical: 50+ pts'><\/div><\/div><div class='risk-scale-labels'><span class='risk-scale-tick' style='left:0%'>0<\/span><span class='risk-scale-tick' style='left:23.08%;transform:translateX(-50%)'>15<\/span><span class='risk-scale-tick' style='left:53.85%;transform:translateX(-50%)'>35<\/span><span class='risk-scale-tick' style='left:76.93%;transform:translateX(-50%)'>50<\/span><span class='risk-scale-tick' style='left:100%;transform:translateX(-100%)'>65+<\/span><\/div><\/div>", certsTitle: "Certificates for Reporting Data Sync (0 active)", certsHtml: "No active certificates", secretsTitle: "Client Secrets for Reporting Data Sync (1 active)", secretsHtml: "<table id='secretsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=\"sortTable('secretsModalTable',0,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name<\/th><th onclick=\"sortTable('secretsModalTable',1,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start<\/th><th onclick=\"sortTable('secretsModalTable',2,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires<\/th><th onclick=\"sortTable('secretsModalTable',3,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Sync Secret<\/td><td style='padding:4px 8px'>2026-06-28<\/td><td style='padding:4px 8px' class=''>2028-06-07<\/td><td style='padding:4px 8px'><code>key-6661<\/code><\/td><\/tr><\/tbody><\/table>", expiringTitle: "Expiring Credentials for Reporting Data Sync (0)", expiringHtml: "No credentials expiring within 30 days", expiredTitle: "Expired Credentials for Reporting Data Sync (0)", expiredHtml: "No expired credentials", ownershipTitle: "App Ownership for Reporting Data Sync", ownershipHtml: "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type<\/td><td style='padding:6px 8px'>Internal (registered in this tenant)<\/td><\/tr><tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID<\/td><td style='padding:6px 8px'><code>11111111-2222-3333-4444-555555555555<\/code><\/td><\/tr><\/tbody><\/table>", ownersTitle: "Owners for Reporting Data Sync (0 total)", ownersHtml: "No owners assigned", ownershipGapTitle: "Ownership Gap for  Reporting Data Sync", ownershipGapHtml: "No ownership gap detected. All owners are assigned to both the Enterprise App and App Registration." },
+"c3c3c3c3-0000-0000-0000-000000000004": { appPermsTitle: "Application Permissions for QuickForms Free (0)", appPermsHtml: "No application permissions assigned", delegatedPermsTitle: "Delegated Permissions for QuickForms Free (1)", delegatedPermsHtml: "<div class='permission-item delegated-permission'><strong>[Delegated]<\/strong> <a href='https://graphpermissions.merill.net/permission/openid' target='_blank' title='View openid on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>openid<\/a> on <em>Microsoft Graph<\/em><\/div>", rolePermsTitle: "Directory Roles for QuickForms Free (0)", rolePermsHtml: "No directory roles assigned", riskTitle: "Risk Analysis for QuickForms Free (3 factors)", riskHtml: "<div class='risk-score-header'><div><div class='risk-score-label'>Total Risk Score<\/div><div class='risk-score-value'>14<\/div><\/div><span class='badge amber'>Medium<\/span><\/div><ul style='margin:5px 0; padding-left: 4px; list-style:none'><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>External application registered in another tenant<\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+5<\/span><\/span><span>External application has no verified publisher<\/span><\/li><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--bad);font-weight:600'>+4<\/span><\/span><span>No owners assigned (neither Service Principal nor App Registration)<\/span><\/li><\/ul><div class='risk-scale-wrap'><div class='risk-scale-marker' style='left:21.5%'><span class='risk-scale-marker-value'>14 pts<\/span><span class='risk-scale-arrow'><\/span><\/div><div class='risk-scale-bar'><div class='risk-scale-seg low' style='width:23.08%' title='Low: 0-14 pts'><\/div><div class='risk-scale-seg medium' style='width:30.77%' title='Medium: 15-34 pts'><\/div><div class='risk-scale-seg high' style='width:23.08%' title='High: 35-49 pts'><\/div><div class='risk-scale-seg critical' style='width:23.08%' title='Critical: 50+ pts'><\/div><\/div><div class='risk-scale-labels'><span class='risk-scale-tick' style='left:0%'>0<\/span><span class='risk-scale-tick' style='left:23.08%;transform:translateX(-50%)'>15<\/span><span class='risk-scale-tick' style='left:53.85%;transform:translateX(-50%)'>35<\/span><span class='risk-scale-tick' style='left:76.93%;transform:translateX(-50%)'>50<\/span><span class='risk-scale-tick' style='left:100%;transform:translateX(-100%)'>65+<\/span><\/div><\/div>", certsTitle: "Certificates for QuickForms Free (0 active)", certsHtml: "No active certificates", secretsTitle: "Client Secrets for QuickForms Free (0 active)", secretsHtml: "No active secrets", expiringTitle: "Expiring Credentials for QuickForms Free (0)", expiringHtml: "No credentials expiring within 30 days", expiredTitle: "Expired Credentials for QuickForms Free (0)", expiredHtml: "No expired credentials", ownershipTitle: "App Ownership for QuickForms Free", ownershipHtml: "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type<\/td><td style='padding:6px 8px'>Third-Party (registered in external tenant)<\/td><\/tr><tr><td style='padding:6px 8px;font-weight:bold'>Publisher<\/td><td style='padding:6px 8px'><span style='color:var(--bad);font-weight:600'>Unverified<\/span><\/td><\/tr><tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID<\/td><td style='padding:6px 8px'><code>99999999-8888-7777-6666-555555555555<\/code><\/td><\/tr><\/tbody><\/table>", ownersTitle: "Owners for QuickForms Free (0 total)", ownersHtml: "No owners assigned", ownershipGapTitle: "Ownership Gap for  QuickForms Free", ownershipGapHtml: "No ownership gap detected. All owners are assigned to both the Enterprise App and App Registration." },
+"14d82eec-204b-4c2f-b7e8-296a70dab67e": { appPermsTitle: "Application Permissions for Microsoft Graph Command Line Tools (0)", appPermsHtml: "No application permissions assigned", delegatedPermsTitle: "Delegated Permissions for Microsoft Graph Command Line Tools (1)", delegatedPermsHtml: "<div class='permission-item delegated-permission'><strong>[Delegated]<\/strong> <a href='https://graphpermissions.merill.net/permission/User.Read' target='_blank' title='View User.Read on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>User.Read<\/a> on <em>Microsoft Graph<\/em><\/div>", rolePermsTitle: "Directory Roles for Microsoft Graph Command Line Tools (0)", rolePermsHtml: "No directory roles assigned", riskTitle: "Risk Analysis for Microsoft Graph Command Line Tools (0 factors)", riskHtml: "<div class='risk-score-header'><div><div class='risk-score-label'>Total Risk Score<\/div><div class='risk-score-value'>0<\/div><\/div><span class='badge green'>Low<\/span><\/div><div>No specific risk factors identified<\/div><div class='risk-scale-wrap'><div class='risk-scale-marker' style='left:0%'><span class='risk-scale-marker-value'>0 pts<\/span><span class='risk-scale-arrow'><\/span><\/div><div class='risk-scale-bar'><div class='risk-scale-seg low' style='width:23.08%' title='Low: 0-14 pts'><\/div><div class='risk-scale-seg medium' style='width:30.77%' title='Medium: 15-34 pts'><\/div><div class='risk-scale-seg high' style='width:23.08%' title='High: 35-49 pts'><\/div><div class='risk-scale-seg critical' style='width:23.08%' title='Critical: 50+ pts'><\/div><\/div><div class='risk-scale-labels'><span class='risk-scale-tick' style='left:0%'>0<\/span><span class='risk-scale-tick' style='left:23.08%;transform:translateX(-50%)'>15<\/span><span class='risk-scale-tick' style='left:53.85%;transform:translateX(-50%)'>35<\/span><span class='risk-scale-tick' style='left:76.93%;transform:translateX(-50%)'>50<\/span><span class='risk-scale-tick' style='left:100%;transform:translateX(-100%)'>65+<\/span><\/div><\/div>", certsTitle: "Certificates for Microsoft Graph Command Line Tools (0 active)", certsHtml: "No active certificates", secretsTitle: "Client Secrets for Microsoft Graph Command Line Tools (0 active)", secretsHtml: "No active secrets", expiringTitle: "Expiring Credentials for Microsoft Graph Command Line Tools (0)", expiringHtml: "No credentials expiring within 30 days", expiredTitle: "Expired Credentials for Microsoft Graph Command Line Tools (0)", expiredHtml: "No expired credentials", ownershipTitle: "App Ownership for Microsoft Graph Command Line Tools", ownershipHtml: "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type<\/td><td style='padding:6px 8px'>Microsoft (first-party service)<\/td><\/tr><tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID<\/td><td style='padding:6px 8px'><code>f8cdef31-a31e-4b4a-93e4-5f571e91255a<\/code><\/td><\/tr><\/tbody><\/table>", ownersTitle: "Owners for Microsoft Graph Command Line Tools (0 total)", ownersHtml: "No owners assigned", ownershipGapTitle: "Ownership Gap for  Microsoft Graph Command Line Tools", ownershipGapHtml: "No ownership gap detected. All owners are assigned to both the Enterprise App and App Registration." },
+"d4d4d4d4-0000-0000-0000-000000000005": { appPermsTitle: "Application Permissions for Legacy Intranet Portal (0)", appPermsHtml: "No application permissions assigned", delegatedPermsTitle: "Delegated Permissions for Legacy Intranet Portal (0)", delegatedPermsHtml: "No delegated permissions assigned", rolePermsTitle: "Directory Roles for Legacy Intranet Portal (0)", rolePermsHtml: "No directory roles assigned", riskTitle: "Risk Analysis for Legacy Intranet Portal (1 factors)", riskHtml: "<div class='risk-score-header'><div><div class='risk-score-label'>Total Risk Score<\/div><div class='risk-score-value'>0<\/div><\/div><span class='badge green'>Low<\/span><\/div><ul style='margin:5px 0; padding-left: 4px; list-style:none'><li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'><span style='color:var(--text-muted)'>&mdash;<\/span><\/span><span>App is disabled (inherent risk shown; not currently exploitable until re-enabled)<\/span><\/li><\/ul><div class='risk-scale-wrap'><div class='risk-scale-marker' style='left:0%'><span class='risk-scale-marker-value'>0 pts<\/span><span class='risk-scale-arrow'><\/span><\/div><div class='risk-scale-bar'><div class='risk-scale-seg low' style='width:23.08%' title='Low: 0-14 pts'><\/div><div class='risk-scale-seg medium' style='width:30.77%' title='Medium: 15-34 pts'><\/div><div class='risk-scale-seg high' style='width:23.08%' title='High: 35-49 pts'><\/div><div class='risk-scale-seg critical' style='width:23.08%' title='Critical: 50+ pts'><\/div><\/div><div class='risk-scale-labels'><span class='risk-scale-tick' style='left:0%'>0<\/span><span class='risk-scale-tick' style='left:23.08%;transform:translateX(-50%)'>15<\/span><span class='risk-scale-tick' style='left:53.85%;transform:translateX(-50%)'>35<\/span><span class='risk-scale-tick' style='left:76.93%;transform:translateX(-50%)'>50<\/span><span class='risk-scale-tick' style='left:100%;transform:translateX(-100%)'>65+<\/span><\/div><\/div>", certsTitle: "Certificates for Legacy Intranet Portal (1 active)", certsHtml: "<table id='certsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=\"sortTable('certsModalTable',0,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name<\/th><th onclick=\"sortTable('certsModalTable',1,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start<\/th><th onclick=\"sortTable('certsModalTable',2,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires<\/th><th onclick=\"sortTable('certsModalTable',3,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Portal TLS Cert<\/td><td style='padding:4px 8px'>2026-03-30<\/td><td style='padding:4px 8px' class=''>2027-03-25<\/td><td style='padding:4px 8px'><code>cert-5551<\/code><\/td><\/tr><\/tbody><\/table>", secretsTitle: "Client Secrets for Legacy Intranet Portal (0 active)", secretsHtml: "No active secrets", expiringTitle: "Expiring Credentials for Legacy Intranet Portal (0)", expiringHtml: "No credentials expiring within 30 days", expiredTitle: "Expired Credentials for Legacy Intranet Portal (0)", expiredHtml: "No expired credentials", ownershipTitle: "App Ownership for Legacy Intranet Portal", ownershipHtml: "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type<\/td><td style='padding:6px 8px'>Internal (registered in this tenant)<\/td><\/tr><tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID<\/td><td style='padding:6px 8px'><code>11111111-2222-3333-4444-555555555555<\/code><\/td><\/tr><\/tbody><\/table>", ownersTitle: "Owners for Legacy Intranet Portal (2 total)", ownersHtml: "<table id='ownersModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=\"sortTable('ownersModalTable',0,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name<\/th><th onclick=\"sortTable('ownersModalTable',1,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type<\/th><th onclick=\"sortTable('ownersModalTable',2,'string')\" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID<\/th><th onclick=\"sortTable('ownersModalTable',3,'string')\" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App<\/th><th onclick=\"sortTable('ownersModalTable',4,'string')\" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration<\/th><\/tr><\/thead><tbody><tr><td style='padding:4px 8px'>Dave DevOps<\/td><td style='padding:4px 8px'>User<\/td><td style='padding:4px 8px'><small>dave@contoso.com<\/small><\/td><td style='padding:4px 8px;text-align:center'>&#10003;<\/td><td style='padding:4px 8px;text-align:center'>&#10003;<\/td><\/tr><tr><td style='padding:4px 8px'>Automation SP<\/td><td style='padding:4px 8px'>ServicePrincipal<\/td><td style='padding:4px 8px'><small>svc-legacy@contoso.com<\/small><\/td><td style='padding:4px 8px;text-align:center'>&#10003;<\/td><td style='padding:4px 8px;text-align:center'>&#10003;<\/td><\/tr><\/tbody><\/table>", ownershipGapTitle: "Ownership Gap for  Legacy Intranet Portal", ownershipGapHtml: "No ownership gap detected. All owners are assigned to both the Enterprise App and App Registration." }
+};
+
+        // Active filters: group -> Set of selected values (OR within a group, AND across groups)
+        const activeFilters = {};
+        const groupLabels = {
+            ownership: 'Ownership', risk: 'Risk', appreg: 'App Reg',
+            assignment: 'Assignment', owners: 'Owners', permissions: 'Permissions', credentials: 'Credentials', enabled: 'Enabled', publisher: 'Publisher'
+        };
+        const valueLabels = {
+            internal: 'Internal', external: 'External', microsoft: 'Microsoft', 'third-party': 'Third-Party',
+            Critical: 'Critical', High: 'High', Medium: 'Medium', Low: 'Low',
+            yes: 'Yes', no: 'No',
+            required: 'Required', 'not-required': 'Open Access',
+            has: 'Has Owners', noowners: 'No Owners', gap: 'Ownership Gap',
+            application: 'Application', delegated: 'Delegated', roles: 'Roles', none: 'None',
+            certs: 'Has Certs', secrets: 'Has Secrets', expiring: 'Expiring', expired: 'Expired',
+            verified: 'Verified', unverified: 'Unverified'
+        };
+
+        function rowMatchesTag(row, group, value) {
+            switch (group) {
+                case 'ownership':   return row.dataset.ownership === value;
+                case 'publisher':
+                    if (value === 'verified')   return row.dataset.verifiedpublisher === 'verified';
+                    if (value === 'unverified') return row.dataset.verifiedpublisher === 'unverified';
+                    return false;
+                case 'risk':        return row.dataset.risk === value;
+                case 'appreg':      return row.dataset.appreg === value;
+                case 'assignment':  return row.dataset.assignment === value;
+                case 'owners':
+                    if (value === 'has')      return row.dataset.owners === 'yes';
+                    if (value === 'noowners') return row.dataset.owners === 'no';
+                    if (value === 'gap')      return row.dataset.ownershipgap === 'yes';
+                    return false;
+                case 'credentials':
+                    if (value === 'certs')    return row.dataset.hascerts === 'yes';
+                    if (value === 'secrets')  return row.dataset.hassecrets === 'yes';
+                    if (value === 'expiring') return row.dataset.expiring === 'yes';
+                    if (value === 'expired')  return row.dataset.expired  === 'yes';
+                    return false;
+                case 'enabled':     return row.dataset.enabled === value;
+                case 'permissions': {
+                    const a = parseInt(row.dataset.apppermcount) || 0;
+                    const d = parseInt(row.dataset.delegatedpermcount) || 0;
+                    const r = parseInt(row.dataset.rolecount) || 0;
+                    if (value === 'application') return a > 0;
+                    if (value === 'delegated')   return d > 0;
+                    if (value === 'roles')       return r > 0;
+                    if (value === 'none')        return a === 0 && d === 0 && r === 0;
+                }
+            }
+            return false;
+        }
+
+        let _searchDebounceHandle = null;
+
+        function queueApplyFilters() {
+            if (_searchDebounceHandle) {
+                clearTimeout(_searchDebounceHandle);
+            }
+            _searchDebounceHandle = setTimeout(applyFilters, 150);
+        }
+
+        function rowVisible(row) {
+            const search = document.getElementById('searchInput').value.toLowerCase().trim();
+            if (search) {
+                const nameMatch  = (row.dataset.name  || '').toLowerCase().includes(search);
+                const appIdMatch = (row.dataset.appid || '').toLowerCase().includes(search);
+                const ownerMatch = (row.dataset.ownertext || '').toLowerCase().includes(search);
+                const permMatch  = (row.dataset.permtext  || '').toLowerCase().includes(search);
+                if (!nameMatch && !appIdMatch && !ownerMatch && !permMatch) return false;
+            }
+            for (const group in activeFilters) {
+                const vals = activeFilters[group];
+                if (!vals || vals.size === 0) continue;
+                let any = false;
+                vals.forEach(v => { if (rowMatchesTag(row, group, v)) any = true; });
+                if (!any) return false;
+            }
+            return true;
+        }
+
+        function applyFilters() {
+            const rows = document.querySelectorAll('#reportTable tbody tr');
+            let shown = 0;
+            rows.forEach(row => {
+                const ok = rowVisible(row);
+                row.style.display = ok ? '' : 'none';
+                if (ok) shown++;
+            });
+            document.getElementById('resultCount').textContent =
+                'Showing ' + shown + ' of ' + rows.length + ' applications';
+            renderActiveChips();
+
+            const search = document.getElementById('searchInput').value.trim();
+            let activeCount = (search ? 1 : 0);
+            for (const g in activeFilters) activeCount += activeFilters[g].size;
+            const summary = document.getElementById('filterSummary');
+            if (activeCount > 0) {
+                summary.textContent = activeCount + ' filter' + (activeCount > 1 ? 's' : '') +
+                    ' \u00b7 showing ' + shown + ' of ' + rows.length;
+                summary.style.display = '';
+            } else {
+                summary.style.display = 'none';
+            }
+        }
+
+        function toggleFilterPanel(forceShow) {
+            const panel = document.getElementById('controlsPanel');
+            const btn = document.getElementById('filterToggle');
+            const show = forceShow === true ? true : panel.hasAttribute('hidden');
+            if (show) { panel.removeAttribute('hidden'); } else { panel.setAttribute('hidden', ''); }
+            btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+            btn.querySelector('.caret').innerHTML = show ? '&#9662;' : '&#9656;';
+        }
+
+        function addFilter(group, value) {
+            if (!activeFilters[group]) activeFilters[group] = new Set();
+            if (!activeFilters[group].has(value)) {
+                activeFilters[group].add(value);
+                const tag = document.querySelector('.filter-tag[data-group="' + group + '"][data-value="' + value + '"]');
+                if (tag) tag.classList.add('active');
+            }
+            applyFilters();
+        }
+
+        function toggleTag(el) {
+            const group = el.dataset.group, value = el.dataset.value;
+            if (!activeFilters[group]) activeFilters[group] = new Set();
+            if (activeFilters[group].has(value)) {
+                activeFilters[group].delete(value);
+                el.classList.remove('active');
+            } else {
+                activeFilters[group].add(value);
+                el.classList.add('active');
+            }
+            applyFilters();
+        }
+
+        function renderActiveChips() {
+            const wrap = document.getElementById('activeChips');
+            const chips = [];
+            for (const group in activeFilters) {
+                activeFilters[group].forEach(v => {
+                    const tagEl = document.querySelector('.filter-tag[data-group="' + group + '"][data-value="' + v + '"]');
+                    const colorClass = tagEl ? (Array.from(tagEl.classList).find(c => c.startsWith('c-')) || '') : '';
+                    chips.push('<span class="chip ' + colorClass + '" onclick="removeFilter(\'' + group + '\',\'' + v + '\')">' + groupLabels[group] + ': ' + (valueLabels[v] || v) + ' &times;</span>');
+                });
+            }
+            wrap.innerHTML = chips.join('');
+            document.getElementById('clearAll').style.display = chips.length ? '' : 'none';
+        }
+
+        function removeFilter(group, value) {
+            if (activeFilters[group]) activeFilters[group].delete(value);
+            const el = document.querySelector('.filter-tag[data-group="' + group + '"][data-value="' + value + '"]');
+            if (el) el.classList.remove('active');
+            applyFilters();
+        }
+
+        function clearAllFilters() {
+            for (const group in activeFilters) activeFilters[group].clear();
+            document.querySelectorAll('.filter-tag.active').forEach(el => el.classList.remove('active'));
+            document.getElementById('searchInput').value = '';
+            applyFilters();
+        }
+
+        function computeTagCounts() {
+            const rows = Array.from(document.querySelectorAll('#reportTable tbody tr'));
+            document.querySelectorAll('.filter-tag').forEach(el => {
+                const group = el.dataset.group, value = el.dataset.value;
+                const n = rows.filter(r => rowMatchesTag(r, group, value)).length;
+                el.querySelector('.cnt').textContent = '(' + n + ')';
+            });
+        }
+
+        let _sortCol = -1, _sortAsc = true;
+        const _modalSortState = {};
+        function sortTable(tableId, columnIndex, type) {
+            const table = document.getElementById(tableId);
+            if (!table) return;
+            let state;
+            if (tableId === 'reportTable') {
+                if (_sortCol === columnIndex) { _sortAsc = !_sortAsc; } else { _sortCol = columnIndex; _sortAsc = type !== 'number'; }
+                state = { col: _sortCol, asc: _sortAsc };
+            } else {
+                state = _modalSortState[tableId] || { col: -1, asc: true };
+                if (state.col === columnIndex) { state.asc = !state.asc; } else { state.col = columnIndex; state.asc = type !== 'number'; }
+                _modalSortState[tableId] = state;
+            }
+            const dir = state.asc ? 1 : -1;
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+
+            rows.sort((a, b) => {
+                let aVal = a.cells[columnIndex].textContent.trim();
+                let bVal = b.cells[columnIndex].textContent.trim();
+                if (type === 'number') {
+                    aVal = parseInt(aVal.replace(/[^0-9]/g, '')) || 0;
+                    bVal = parseInt(bVal.replace(/[^0-9]/g, '')) || 0;
+                    return (aVal - bVal) * dir;
+                }
+                return aVal.localeCompare(bVal) * dir;
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+
+            table.querySelectorAll('thead th').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+            });
+            table.querySelectorAll('thead th')[columnIndex]
+                ?.classList.add(state.asc ? 'sort-asc' : 'sort-desc');
+        }
+
+        function exportCsv() {
+            const headers = Array.from(document.querySelectorAll('#reportTable thead th'))
+                .map(th => th.textContent.replace(/[▲▼]/g, '').trim());
+
+            const visibleRows = Array.from(document.querySelectorAll('#reportTable tbody tr'))
+                .filter(tr => tr.style.display !== 'none');
+
+            const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
+
+            const lines = [headers.map(esc).join(',')];
+            visibleRows.forEach(tr => {
+                const cells = Array.from(tr.cells).map(td => {
+                    const clone = td.cloneNode(true);
+                    clone.querySelectorAll('.csv-exclude').forEach(n => n.remove());
+                    return esc(clone.textContent.trim().replace(/\s+/g, ' '));
+                });
+                lines.push(cells.join(','));
+            });
+
+            // UTF-8 BOM ensures Excel opens the file with correct encoding
+            const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = 'EntraIDReport_' + new Date().toISOString().slice(0, 10) + '.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        let _modalTrigger = null;
+
+        function openDetailModal(title, html) {
+            _modalTrigger = document.activeElement;
+            document.getElementById('detailModalTitle').textContent = title;
+            document.getElementById('detailModalBody').innerHTML = html;
+            document.getElementById('detailModalOverlay').classList.add('active');
+            document.querySelector('#detailModalOverlay .modal-box').scrollTop = 0;
+            document.querySelector('.modal-close').focus();
+            delete _modalSortState['certsModalTable'];
+            delete _modalSortState['secretsModalTable'];
+            delete _modalSortState['expiringModalTable'];
+            delete _modalSortState['expiredModalTable'];
+            delete _modalSortState['ownersModalTable'];
+        }
+
+        function closeDetailModal() {
+            document.getElementById('detailModalOverlay').classList.remove('active');
+            if (_modalTrigger) { _modalTrigger.focus(); _modalTrigger = null; }
+        }
+
+        function toggleTheme() {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const next = isDark ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            document.getElementById('themeToggle').innerHTML = next === 'dark' ? '&#9728;&#65039;' : '&#127769;';
+            localStorage.setItem('entra-report-theme', next);
+        }
+
+        (function () {
+            const saved = localStorage.getItem('entra-report-theme') || 'light';
+            document.documentElement.setAttribute('data-theme', saved);
+            document.getElementById('themeToggle').innerHTML = saved === 'dark' ? '&#9728;&#65039;' : '&#127769;';
+
+            document.getElementById('reportTable').addEventListener('click', function (e) {
+                const badge = e.target.closest('.clickable-badge');
+                if (!badge) return;
+                const group = badge.dataset.fg, value = badge.dataset.fv;
+                if (!group || !value) return;
+                addFilter(group, value);
+                toggleFilterPanel(true);
+            });
+
+            document.querySelector('.summary').addEventListener('click', function (e) {
+                const card = e.target.closest('.summary-card');
+                if (!card) return;
+                if (card.dataset.clear) { clearAllFilters(); return; }
+                const group = card.dataset.fg, value = card.dataset.fv;
+                if (!group || !value) return;
+                addFilter(group, value);
+                toggleFilterPanel(true);
+                document.getElementById('reportTable').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') closeDetailModal();
+            });
+
+            computeTagCounts();
+            applyFilters();
+        })();
+    </script>
+
+    <div id="detailModalOverlay" class="modal-overlay" onclick="if(event.target===this) closeDetailModal()">
+        <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle" aria-describedby="detailModalBody">
+            <button class="modal-close" onclick="closeDetailModal()" aria-label="Close">&times;</button>
+            <h3 id="detailModalTitle"></h3>
+            <div id="detailModalBody"></div>
+        </div>
+    </div>
+    </div>
+
+    <footer class="report-footer">
+        Copyright &copy; 2026 <a href="https://www.matej.guru/about" target="_blank" rel="noopener">Matej Klemencic</a>
+    </footer>
+</body>
+</html>

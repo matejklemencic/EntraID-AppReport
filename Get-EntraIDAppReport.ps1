@@ -123,6 +123,7 @@ $ErrorActionPreference = 'Stop'
 $script:MicrosoftTenantIds = @(
     'f8cdef31-a31e-4b4a-93e4-5f571e91255a',  # Microsoft Services
     '72f988bf-86f1-41af-91ab-2d7cd011db47',  # Microsoft
+    '9188040d-6c67-4c5b-b112-36a304b66dad',  # Microsoft Accounts
     'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'   # Microsoft Azure
 )
 
@@ -590,12 +591,16 @@ function Get-ApplicationCredentials {
     $spExpiring      = @(@($ServicePrincipal.PasswordCredentials) + @($ServicePrincipal.KeyCredentials) | Where-Object {
         $_.EndDateTime -gt $now -and $_.EndDateTime -lt $expiryThreshold
     })
+    $spExpired       = @(@($ServicePrincipal.PasswordCredentials) + @($ServicePrincipal.KeyCredentials) | Where-Object {
+        $_.EndDateTime -ne $null -and $_.EndDateTime -le $now
+    })
 
     $hasAppReg = $false
     $appRegId = $null
     $appActiveSecrets = @()
     $appActiveCerts = @()
     $appExpiring = @()
+    $appExpired  = @()
 
     try {
         $app = Get-MgApplication -Filter "appId eq '$AppId'" -Property "Id,PasswordCredentials,KeyCredentials" -ErrorAction SilentlyContinue
@@ -607,6 +612,9 @@ function Get-ApplicationCredentials {
             $appExpiring      = @(@($app.PasswordCredentials) + @($app.KeyCredentials) | Where-Object {
                 $_.EndDateTime -gt $now -and $_.EndDateTime -lt $expiryThreshold
             })
+            $appExpired       = @(@($app.PasswordCredentials) + @($app.KeyCredentials) | Where-Object {
+                $_.EndDateTime -ne $null -and $_.EndDateTime -le $now
+            })
         }
     }
     catch {
@@ -616,6 +624,7 @@ function Get-ApplicationCredentials {
     $totalActiveSecrets = $spActiveSecrets.Count + $appActiveSecrets.Count
     $totalActiveCerts   = $spActiveCerts.Count + $appActiveCerts.Count
     $totalExpiring      = $spExpiring.Count + $appExpiring.Count
+    $totalExpired       = $spExpired.Count + $appExpired.Count
 
     # Long-lived: any active credential with expiry > 1 year from now
     $longLivedThreshold = $now.AddDays(365)
@@ -629,6 +638,7 @@ function Get-ApplicationCredentials {
         ActiveSecrets        = $totalActiveSecrets
         ActiveCertificates   = $totalActiveCerts
         ExpiringCredentials  = $totalExpiring
+        ExpiredCredentials   = $totalExpired
         UsesPasswordSecrets  = ($totalActiveSecrets -gt 0)
         SecretCount          = $totalActiveSecrets
         HasLongLivedCredentials = $hasLongLived
@@ -1029,6 +1039,7 @@ foreach ($sp in $servicePrincipals) {
         ActiveSecrets           = $credentials.ActiveSecrets
         ActiveCertificates      = $credentials.ActiveCertificates
         ExpiringCredentials     = $credentials.ExpiringCredentials
+        ExpiredCredentials      = $credentials.ExpiredCredentials
         UsesPasswordSecrets     = $credentials.UsesPasswordSecrets
         SecretCount             = $credentials.SecretCount
         HasLongLivedCredentials = $credentials.HasLongLivedCredentials
@@ -1147,7 +1158,7 @@ $html = @"
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Microsoft Entra ID Service Principals (Enterprise Applications) Report</title>
+    <title>Entra ID Enterprise Application Risk Assessment</title>
     <style>
         /* -- Light Theme Variables -- */
         :root {
@@ -1248,8 +1259,6 @@ $html = @"
             top: 0;
             z-index: 100;
         }
-        header .header-logo { flex-shrink: 0; opacity: 0.95; line-height: 0; }
-        header .header-logo svg { width: 34px; height: 34px; }
         header .header-text { flex: 1; }
         header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }
         header .meta { font-size: 11px; opacity: 0.75; margin-top: 1px; line-height: 1.7; }
@@ -1269,6 +1278,17 @@ $html = @"
             line-height: 1;
         }
         #themeToggle:hover { background: rgba(255,255,255,0.25); transform: rotate(20deg); }
+        .github-link {
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.25);
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.2s, transform 0.2s;
+            line-height: 0;
+        }
+        .github-link:hover { background: rgba(255,255,255,0.25); transform: scale(1.1); }
 
         /* -- Layout -- */
         .container { max-width: 1600px; margin: 24px auto; padding: 0 24px 48px; }
@@ -1339,7 +1359,7 @@ $html = @"
             transition: background 0.25s, box-shadow 0.25s;
         }
         .controls h3 { margin: 0 0 12px; font-size: 14px; color: var(--gray-dark); }
-        .controls input, .controls select {
+        .controls input:not(.filter-search), .controls select {
             margin: 4px; padding: 9px 11px;
             border: 1px solid var(--border);
             border-radius: 5px;
@@ -1352,12 +1372,12 @@ $html = @"
             outline: none; border-color: var(--blue);
             box-shadow: 0 0 0 2px var(--blue-light);
         }
-        .controls button {
+        .controls button:not(.clear-all) {
             background: var(--blue); color: #fff; border: none;
             padding: 9px 18px; border-radius: 5px; cursor: pointer; margin: 4px;
             font-size: 13px; transition: background 0.2s;
         }
-        .controls button:hover { background: var(--blue-dark); }
+        .controls button:not(.clear-all):hover { background: var(--blue-dark); }
 
         /* -- Tag filters -- */
         .filter-bar { display: flex; align-items: center; gap: 12px; margin: 4px 0 8px; }
@@ -1373,21 +1393,22 @@ $html = @"
         .filter-toggle-btn[aria-expanded="true"] { border-color: var(--blue); }
         .filter-toggle-btn .caret { font-size: 10px; color: var(--gray); transition: transform 0.15s; }
         .export-csv-btn {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 8px 14px; border-radius: 6px; border: 2px solid var(--blue);
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--bg-panel); border: 1px solid var(--border); color: var(--text);
+            padding: 8px 16px; border-radius: 6px;
             font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
-            cursor: pointer; background: transparent; color: var(--blue);
-            transition: background 0.15s; margin-left: auto;
+            cursor: pointer; margin-left: auto;
+            transition: background 0.15s, border-color 0.15s;
         }
-        .export-csv-btn:hover { background: var(--blue-xs); }
-        .filter-summary { font-size: 13px; font-weight: 600; color: var(--blue); }
+        .export-csv-btn:hover { border-color: var(--blue); background: var(--blue-xs); }
+        .filter-summary { font-size: 13px; font-weight: 600; color: var(--text); }
 
         .clickable-badge { cursor: pointer; transition: filter 0.15s, box-shadow 0.15s; }
         .clickable-badge:hover { filter: brightness(1.15); }
 
         .filter-search {
             width: 100%;
-            margin: 4px 0 16px;
+            margin: 4px 0 28px;
             padding: 11px 14px;
             border: 1px solid var(--border);
             border-radius: 6px;
@@ -1435,14 +1456,30 @@ $html = @"
         .active-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
         .chip {
             display: inline-flex; align-items: center; gap: 4px;
-            background: var(--blue-xs); color: var(--blue); border: 1px solid var(--blue-light);
+            background: #0078d4; color: #fff; border: none;
             padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; cursor: pointer;
         }
-        .chip:hover { background: var(--blue-light); }
+        .chip.c-green  { background: #107c10; }
+        .chip.c-red    { background: #c50f1f; }
+        .chip.c-orange { background: #d83b01; }
+        .chip.c-amber  { background: #b06000; }
+        .chip.c-purple { background: #7054a0; }
+        .chip.c-gray   { background: #767676; }
+        .chip:hover { filter: brightness(1.15); }
+        [data-theme="dark"] .chip.c-green  { background: #2a9d2a; }
+        [data-theme="dark"] .chip.c-red    { background: #e3223a; }
+        [data-theme="dark"] .chip.c-orange { background: #f0571f; }
+        [data-theme="dark"] .chip.c-amber  { background: #c87000; }
+        [data-theme="dark"] .chip.c-purple { background: #9070c0; }
         .clear-all {
-            background: none; border: none; color: var(--blue); cursor: pointer;
-            font-size: 12px; font-weight: 600; text-decoration: underline; padding: 0; margin-left: auto;
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--bg-panel); border: 1px solid var(--border); color: var(--text);
+            padding: 8px 16px; border-radius: 6px;
+            font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            cursor: pointer; margin-left: auto;
+            transition: background 0.15s, border-color 0.15s;
         }
+        .clear-all:hover { border-color: var(--blue); background: var(--blue-xs); }
 
         /* -- Table -- */
         .table-wrap {
@@ -1504,6 +1541,35 @@ $html = @"
         [data-theme="dark"] .badge.orange { background: #f0571f; }
         [data-theme="dark"] .badge.amber  { background: #c87000; }
         [data-theme="dark"] .badge.purple { background: #9070c0; }
+
+        .expiring-date { color: #d83b01; font-weight: 700; }
+        .expired-date  { color: #c50f1f; font-weight: 700; }
+        [data-theme="dark"] .expiring-date { color: #f0571f; }
+        [data-theme="dark"] .expired-date  { color: #e3223a; }
+
+        /* -- Risk Analysis modal: score header + threshold scale bar -- */
+        .risk-score-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin: 0 0 14px 0; padding-bottom: 12px; border-bottom: 1px solid var(--border);
+        }
+        .risk-score-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+        .risk-score-value { font-size: 30px; font-weight: 700; line-height: 1.15; color: var(--bad); }
+        .risk-score-header .badge { font-size: 12px; padding: 5px 14px; }
+        .risk-scale-wrap { position: relative; margin: 34px 0 6px; }
+        .risk-scale-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; }
+        .risk-scale-seg.low      { background: #107c10; }
+        .risk-scale-seg.medium  { background: #b06000; }
+        .risk-scale-seg.high     { background: #d83b01; }
+        .risk-scale-seg.critical { background: #c50f1f; }
+        [data-theme="dark"] .risk-scale-seg.low      { background: #2a9d2a; }
+        [data-theme="dark"] .risk-scale-seg.medium   { background: #c87000; }
+        [data-theme="dark"] .risk-scale-seg.high     { background: #f0571f; }
+        [data-theme="dark"] .risk-scale-seg.critical { background: #e3223a; }
+        .risk-scale-marker { position: absolute; top: -22px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; }
+        .risk-scale-marker .risk-scale-marker-value { font-size: 10px; font-weight: 700; color: var(--text); white-space: nowrap; }
+        .risk-scale-marker .risk-scale-arrow { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid var(--text); margin-top: 2px; }
+        .risk-scale-labels { position: relative; height: 14px; margin-top: 4px; }
+        .risk-scale-tick { position: absolute; top: 0; font-size: 10px; color: var(--text-muted); white-space: nowrap; }
 
         .perm-badges { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 
@@ -1571,17 +1637,15 @@ $html = @"
 </head>
 <body>
     <header>
-        <span class="header-logo">
-            $logoSvg
-        </span>
         <div class="header-text">
-            <h1>Microsoft Entra ID Service Principals (Enterprise Applications) Report</h1>
+            <h1>Entra ID Enterprise Application Risk Assessment</h1>
             <div class="meta">
                 <strong>Tenant:</strong> $(ConvertTo-HtmlSafe $tenantName) &nbsp;&middot;&nbsp;
                 <strong>Tenant ID:</strong> $(ConvertTo-HtmlSafe $tenantId) &nbsp;&middot;&nbsp;
                 <strong>Generated:</strong> $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
             </div>
         </div>
+        <a class="github-link" href="https://github.com/matejklemencic/EntraID-AppReport" target="_blank" rel="noopener" title="View source on GitHub"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16" fill="#ffffff"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
         <button id="themeToggle" onclick="toggleTheme()" title="Toggle dark / light mode">&#127769;</button>
     </header>
 
@@ -1649,8 +1713,8 @@ $html = @"
         <button id="filterToggle" class="filter-toggle-btn" onclick="toggleFilterPanel()" aria-expanded="false">
             <span class="caret">&#9656;</span> Search &amp; Filter
         </button>
-        <button class="export-csv-btn" onclick="exportCsv()" title="Download visible rows as CSV">&#8595; Export CSV</button>
         <span id="filterSummary" class="filter-summary"></span>
+        <button class="export-csv-btn" onclick="exportCsv()" title="Download visible rows as CSV">&#8595; Export CSV</button>
     </div>
 
     <div class="controls" id="controlsPanel" hidden>
@@ -1705,8 +1769,9 @@ $html = @"
         <div class="filter-group">
             <span class="filter-group-label">Credentials</span>
             <span class="filter-tag c-green" data-group="credentials" data-value="certs"    onclick="toggleTag(this)">Has Certs <span class="cnt"></span></span>
-            <span class="filter-tag c-amber" data-group="credentials" data-value="secrets"  onclick="toggleTag(this)">Has Secrets <span class="cnt"></span></span>
-            <span class="filter-tag c-red"   data-group="credentials" data-value="expiring" onclick="toggleTag(this)">Expiring <span class="cnt"></span></span>
+            <span class="filter-tag c-amber"  data-group="credentials" data-value="secrets"  onclick="toggleTag(this)">Has Secrets <span class="cnt"></span></span>
+            <span class="filter-tag c-orange" data-group="credentials" data-value="expiring" onclick="toggleTag(this)">Expiring <span class="cnt"></span></span>
+            <span class="filter-tag c-red"    data-group="credentials" data-value="expired"  onclick="toggleTag(this)">Expired <span class="cnt"></span></span>
         </div>
 
         <div class="filter-results">
@@ -1720,16 +1785,16 @@ $html = @"
     <table id="reportTable">
         <thead>
             <tr>
-                <th onclick="sortTable(0, 'string')">Application Name</th>
-                <th onclick="sortTable(1, 'string')">Enabled</th>
-                <th onclick="sortTable(2, 'string')">App ID</th>
-                <th onclick="sortTable(3, 'string')">App Ownership</th>
-                <th onclick="sortTable(4, 'string')">Has App Registration</th>
-                <th onclick="sortTable(5, 'string')">Assignment Required</th>
-                <th onclick="sortTable(6, 'string')">Owners</th>
-                <th onclick="sortTable(7, 'string')">Risk Level</th>
+                <th onclick="sortTable('reportTable', 0, 'string')">Application Name</th>
+                <th onclick="sortTable('reportTable', 1, 'string')">Enabled</th>
+                <th onclick="sortTable('reportTable', 2, 'string')">App ID</th>
+                <th onclick="sortTable('reportTable', 3, 'string')">App Ownership</th>
+                <th onclick="sortTable('reportTable', 4, 'string')">Has App Registration</th>
+                <th onclick="sortTable('reportTable', 5, 'string')">Assignment Required</th>
+                <th onclick="sortTable('reportTable', 6, 'string')">Owners</th>
+                <th onclick="sortTable('reportTable', 7, 'string')">Risk Level</th>
                 <th>Permissions</th>
-                <th onclick="sortTable(9, 'string')">Credentials</th>
+                <th onclick="sortTable('reportTable', 9, 'string')">Credentials</th>
             </tr>
         </thead>
         <tbody>
@@ -1754,7 +1819,7 @@ foreach ($app in $sortedReport) {
     $ownershipText = switch ($ownershipType) {
         "internal"    { "<span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App registered in this tenant and owned by your organization'>Internal</span>" }
         "microsoft"   { "<span class='badge blue' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App owned by Microsoft. This is a first party Microsoft service'>Microsoft</span>" }
-        "third-party" { "<span class='badge red' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App registered in another tenant. This is a third party service'>Third-Party</span>" }
+        "third-party" { "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App registered in another tenant. This is a third party service'>Third-Party</span>" }
     }
     $ownershipClass = switch ($ownershipType) {
         "internal"    { "internal-app" }
@@ -1766,9 +1831,9 @@ foreach ($app in $sortedReport) {
     if ($ownershipType -eq "third-party") {
         if ($app.IsVerifiedPublisher) {
             $vpName = ConvertTo-HtmlSafe $app.VerifiedPublisherName
-            $ownershipText += "<div style='margin-top:4px'><span class='badge green clickable-badge' data-fg='publisher' data-fv='verified' title='Microsoft-verified publisher: $vpName. Click to filter'>Verified Publisher</span></div>"
+            $ownershipText += "<div style='margin-top:4px'><span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='Microsoft-verified publisher: $vpName. Click to view details'>Verified Publisher</span></div>"
         } else {
-            $ownershipText += "<div style='margin-top:4px'><span class='badge gray clickable-badge' data-fg='publisher' data-fv='unverified' title='No Microsoft-verified publisher. The developer identity behind this app has not been verified. Click to filter'>Unverified Publisher</span></div>"
+            $ownershipText += "<div style='margin-top:4px'><span class='badge red' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='No Microsoft-verified publisher. The developer identity behind this app has not been verified. Click to view details'>Unverified Publisher</span></div>"
         }
     }
 
@@ -1821,11 +1886,16 @@ foreach ($app in $sortedReport) {
     }
     $expiringBadgeHtml = ""
     if ($app.ExpiringCredentials -gt 0) {
-        $expiringBadgeHtml = "<span class='badge red' title='Credentials expiring within 30 days. Renew them to avoid authentication failures'>Expiring: $($app.ExpiringCredentials)</span>"
+        $expiringBadgeHtml = "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].expiringTitle,reportDetails['$($app.AppId)'].expiringHtml)`" style='cursor:pointer' title='Credentials expiring within 30 days. Renew them to avoid authentication failures — click to view details'>Expiring: $($app.ExpiringCredentials)</span>"
+    }
+    $expiredBadgeHtml = ""
+    if ($app.ExpiredCredentials -gt 0) {
+        $expiredBadgeHtml = "<span class='badge red' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].expiredTitle,reportDetails['$($app.AppId)'].expiredHtml)`" style='cursor:pointer' title='Credentials that have already expired and should be removed or renewed — click to view details'>Expired: $($app.ExpiredCredentials)</span>"
     }
     $hasCertsValue = if ($app.ActiveCertificates -gt 0) { "yes" } else { "no" }
     $hasSecretsValue = if ($app.ActiveSecrets -gt 0) { "yes" } else { "no" }
     $expiringValue = if ($app.ExpiringCredentials -gt 0) { "yes" } else { "no" }
+    $expiredValue  = if ($app.ExpiredCredentials -gt 0) { "yes" } else { "no" }
     
     # Build scoped permission HTML — one accumulator per type (single pass)
     $appPermItems       = ""
@@ -1860,6 +1930,50 @@ foreach ($app in $sortedReport) {
     # Build risk factors — escape each item as it may contain API-sourced permission/app names
     # Points are shown on the left (red, fixed-width) and factors are sorted highest-to-lowest,
     # with 0-point informational items last. An optional Detail renders as a hover tooltip.
+    # Risk level badge colour
+    $riskBadgeColor = switch ($app.RiskLevel) {
+        "Critical" { "red" }
+        "High"     { "orange" }
+        "Medium"   { "amber" }
+        "Low"      { "green" }
+        default    { "gray" }
+    }
+
+    # Score header: label + big number on the left, risk-level badge set apart on the right
+    $riskScoreHeaderHtml = "<div class='risk-score-header'><div><div class='risk-score-label'>Total Risk Score</div><div class='risk-score-value'>$($app.RiskScore)</div></div><span class='badge $riskBadgeColor'>$($app.RiskLevel)</span></div>"
+
+    # Threshold scale bar — segment widths are proportional to the real threshold ranges
+    # (Low 0-14, Medium 15-34, High 35-49, Critical 50+). The visual scale caps at 65 so the
+    # open-ended Critical band still renders as a normal-sized segment; scores above the cap
+    # simply pin the marker at the right edge.
+    $riskScaleMax    = 65
+    $riskScoreClamped = [Math]::Min($app.RiskScore, $riskScaleMax)
+    $riskMarkerPct    = [Math]::Round(($riskScoreClamped / $riskScaleMax) * 100, 1)
+    $riskLowPct       = [Math]::Round((15 / $riskScaleMax) * 100, 2)
+    $riskMediumPct    = [Math]::Round((20 / $riskScaleMax) * 100, 2)
+    $riskHighPct      = [Math]::Round((15 / $riskScaleMax) * 100, 2)
+    $riskCriticalPct  = [Math]::Round((($riskScaleMax - 50) / $riskScaleMax) * 100, 2)
+    # Tick positions match the exact threshold boundaries (0, 15, 35, 50, 65) on the same
+    # 0-65 scale as the segments/marker, so each label sits directly above its color transition.
+    $riskTick15Pct = $riskLowPct
+    $riskTick35Pct = $riskLowPct + $riskMediumPct
+    $riskTick50Pct = $riskLowPct + $riskMediumPct + $riskHighPct
+    $riskLevelLegendHtml = "<div class='risk-scale-wrap'>" +
+            "<div class='risk-scale-marker' style='left:$riskMarkerPct%'><span class='risk-scale-marker-value'>$($app.RiskScore) pts</span><span class='risk-scale-arrow'></span></div>" +
+            "<div class='risk-scale-bar'>" +
+                "<div class='risk-scale-seg low' style='width:$riskLowPct%' title='Low: 0-14 pts'></div>" +
+                "<div class='risk-scale-seg medium' style='width:$riskMediumPct%' title='Medium: 15-34 pts'></div>" +
+                "<div class='risk-scale-seg high' style='width:$riskHighPct%' title='High: 35-49 pts'></div>" +
+                "<div class='risk-scale-seg critical' style='width:$riskCriticalPct%' title='Critical: 50+ pts'></div>" +
+            "</div>" +
+            "<div class='risk-scale-labels'>" +
+                "<span class='risk-scale-tick' style='left:0%'>0</span>" +
+                "<span class='risk-scale-tick' style='left:$($riskTick15Pct)%;transform:translateX(-50%)'>15</span>" +
+                "<span class='risk-scale-tick' style='left:$($riskTick35Pct)%;transform:translateX(-50%)'>35</span>" +
+                "<span class='risk-scale-tick' style='left:$($riskTick50Pct)%;transform:translateX(-50%)'>50</span>" +
+                "<span class='risk-scale-tick' style='left:100%;transform:translateX(-100%)'>65+</span>" +
+            "</div>" +
+        "</div>"
     $riskFactorsHtml = if ($app.RiskFactors.Count -gt 0) {
         # Stable sort: descending by points, preserving original order within equal points.
         # (Windows PowerShell 5.1 Sort-Object is not stable, so use an index tiebreaker.)
@@ -1892,18 +2006,9 @@ foreach ($app in $sortedReport) {
             }
             "<li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'>$pointsCell</span><span>$factorText$detailMarker</span></li>"
         }) -join ""
-        "<div style='margin:0 0 12px 0;font-size:14px;font-weight:600'>Total Risk Score: <span style='color:var(--bad)'>$($app.RiskScore)</span> ($($app.RiskLevel))</div><ul style='margin:5px 0; padding-left: 4px; list-style:none'>$riskFactorItems</ul>"
+        "$riskScoreHeaderHtml<ul style='margin:5px 0; padding-left: 4px; list-style:none'>$riskFactorItems</ul>$riskLevelLegendHtml"
     } else {
-        "No specific risk factors identified"
-    }
-    
-    # Risk level badge colour
-    $riskBadgeColor = switch ($app.RiskLevel) {
-        "Critical" { "red" }
-        "High"     { "orange" }
-        "Medium"   { "amber" }
-        "Low"      { "green" }
-        default    { "gray" }
+        "$riskScoreHeaderHtml<div>No specific risk factors identified</div>$riskLevelLegendHtml"
     }
     
     $safeDisplayName = ConvertTo-HtmlSafe $app.DisplayName
@@ -1956,9 +2061,10 @@ foreach ($app in $sortedReport) {
             $cStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $cEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $cKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
-            "<tr><td style='padding:4px 8px'>$cName</td><td style='padding:4px 8px'>$cStart</td><td style='padding:4px 8px'>$cEnd</td><td style='padding:4px 8px'><code>$cKeyId</code></td></tr>"
+            $cEndClass = if ($_.EndDateTime -and $_.EndDateTime -le (Get-Date)) { "expired-date" } elseif ($_.EndDateTime -and $_.EndDateTime -lt (Get-Date).AddDays(30)) { "expiring-date" } else { "" }
+            "<tr><td style='padding:4px 8px'>$cName</td><td style='padding:4px 8px'>$cStart</td><td style='padding:4px 8px' class='$cEndClass'>$cEnd</td><td style='padding:4px 8px'><code>$cKeyId</code></td></tr>"
         }) -join ""
-        $certsModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$certRows</tbody></table>"
+        $certsModalHtml = "<table id='certsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('certsModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('certsModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('certsModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('certsModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$certRows</tbody></table>"
     } else {
         $certsModalHtml = "No active certificates"
     }
@@ -1970,11 +2076,49 @@ foreach ($app in $sortedReport) {
             $sStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $sEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $sKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
-            "<tr><td style='padding:4px 8px'>$sName</td><td style='padding:4px 8px'>$sStart</td><td style='padding:4px 8px'>$sEnd</td><td style='padding:4px 8px'><code>$sKeyId</code></td></tr>"
+            $sEndClass = if ($_.EndDateTime -and $_.EndDateTime -le (Get-Date)) { "expired-date" } elseif ($_.EndDateTime -and $_.EndDateTime -lt (Get-Date).AddDays(30)) { "expiring-date" } else { "" }
+            "<tr><td style='padding:4px 8px'>$sName</td><td style='padding:4px 8px'>$sStart</td><td style='padding:4px 8px' class='$sEndClass'>$sEnd</td><td style='padding:4px 8px'><code>$sKeyId</code></td></tr>"
         }) -join ""
-        $secretsModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$secretRows</tbody></table>"
+        $secretsModalHtml = "<table id='secretsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('secretsModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('secretsModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('secretsModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('secretsModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$secretRows</tbody></table>"
     } else {
         $secretsModalHtml = "No active secrets"
+    }
+    # Expiring / Expired credentials modals — combined certs + secrets, filtered to the relevant status
+    $allCredsForStatus = @()
+    if ($app.ActiveCertificateList) { $allCredsForStatus += ($app.ActiveCertificateList | ForEach-Object { [PSCustomObject]@{ Kind = "Certificate"; DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
+    if ($app.ActiveSecretList)      { $allCredsForStatus += ($app.ActiveSecretList      | ForEach-Object { [PSCustomObject]@{ Kind = "Secret";      DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
+    $credStatusNow = Get-Date
+    $expiringCredList = @($allCredsForStatus | Where-Object { $_.EndDateTime -and $_.EndDateTime -gt $credStatusNow -and $_.EndDateTime -lt $credStatusNow.AddDays(30) })
+    $expiredCredList  = @($allCredsForStatus | Where-Object { $_.EndDateTime -and $_.EndDateTime -le $credStatusNow })
+
+    $expiringModalTitle = "Expiring Credentials for $($app.DisplayName) ($($expiringCredList.Count))"
+    if ($expiringCredList.Count -gt 0) {
+        $expiringRows = ($expiringCredList | ForEach-Object {
+            $xKind  = ConvertTo-HtmlSafe $_.Kind
+            $xName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
+            $xStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
+            $xEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
+            $xKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
+            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expiring-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
+        }) -join ""
+        $expiringModalHtml = "<table id='expiringModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('expiringModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('expiringModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('expiringModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('expiringModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('expiringModalTable',4,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$expiringRows</tbody></table>"
+    } else {
+        $expiringModalHtml = "No credentials expiring within 30 days"
+    }
+
+    $expiredModalTitle = "Expired Credentials for $($app.DisplayName) ($($expiredCredList.Count))"
+    if ($expiredCredList.Count -gt 0) {
+        $expiredRows = ($expiredCredList | ForEach-Object {
+            $xKind  = ConvertTo-HtmlSafe $_.Kind
+            $xName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
+            $xStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
+            $xEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
+            $xKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
+            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expired-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
+        }) -join ""
+        $expiredModalHtml = "<table id='expiredModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('expiredModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('expiredModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('expiredModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('expiredModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('expiredModalTable',4,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$expiredRows</tbody></table>"
+    } else {
+        $expiredModalHtml = "No expired credentials"
     }
     # Ownership modal
     $ownershipLabel = switch ($ownershipType) {
@@ -1988,7 +2132,7 @@ foreach ($app in $sortedReport) {
     if ($ownershipType -eq "third-party") {
         if ($app.IsVerifiedPublisher) {
             $vpNameSafe = ConvertTo-HtmlSafe $app.VerifiedPublisherName
-            $publisherRow = "<tr><td style='padding:6px 8px;font-weight:bold'>Publisher</td><td style='padding:6px 8px'><span style='color:var(--good);font-weight:600'>Verified</span> &mdash; $vpNameSafe</td></tr>"
+            $publisherRow = "<tr><td style='padding:6px 8px;font-weight:bold'>Publisher</td><td style='padding:6px 8px'><span style='color:var(--good);font-weight:600'>Verified</span> - $vpNameSafe</td></tr>"
         } else {
             $publisherRow = "<tr><td style='padding:6px 8px;font-weight:bold'>Publisher</td><td style='padding:6px 8px'><span style='color:var(--bad);font-weight:600'>Unverified</span></td></tr>"
         }
@@ -2006,7 +2150,7 @@ foreach ($app in $sortedReport) {
             $onApp = if ($_.Source -eq 'AppRegistration'  -or $_.Source -eq 'Both') { "&#10003;" } else { "&#8212;" }
             "<tr><td style='padding:4px 8px'>$oName</td><td style='padding:4px 8px'>$oType</td><td style='padding:4px 8px'><small>$oUpn</small></td><td style='padding:4px 8px;text-align:center'>$onSp</td><td style='padding:4px 8px;text-align:center'>$onApp</td></tr>"
         }) -join ""
-        $ownersModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App</th><th style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration</th></tr></thead><tbody>$ownerRows</tbody></table>"
+        $ownersModalHtml = "<table id='ownersModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('ownersModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th onclick=`"sortTable('ownersModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('ownersModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th onclick=`"sortTable('ownersModalTable',3,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App</th><th onclick=`"sortTable('ownersModalTable',4,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration</th></tr></thead><tbody>$ownerRows</tbody></table>"
     } else {
         $ownersModalHtml = "No owners assigned"
     }
@@ -2029,19 +2173,19 @@ foreach ($app in $sortedReport) {
     } else {
         $ownershipGapModalHtml = "No ownership gap detected. All owners are assigned to both the Enterprise App and App Registration."
     }
-    $modalDataEntries.Add("`"$safeKey`": { appPermsTitle: $(ConvertTo-Json $appPermsModalTitle -Compress), appPermsHtml: $(ConvertTo-Json $appPermItems -Compress), delegatedPermsTitle: $(ConvertTo-Json $delegatedPermsModalTitle -Compress), delegatedPermsHtml: $(ConvertTo-Json $delegatedPermItems -Compress), rolePermsTitle: $(ConvertTo-Json $rolePermsModalTitle -Compress), rolePermsHtml: $(ConvertTo-Json $rolePermItems -Compress), riskTitle: $(ConvertTo-Json $riskModalTitle -Compress), riskHtml: $(ConvertTo-Json $riskFactorsHtml -Compress), certsTitle: $(ConvertTo-Json $certsModalTitle -Compress), certsHtml: $(ConvertTo-Json $certsModalHtml -Compress), secretsTitle: $(ConvertTo-Json $secretsModalTitle -Compress), secretsHtml: $(ConvertTo-Json $secretsModalHtml -Compress), ownershipTitle: $(ConvertTo-Json $ownershipModalTitle -Compress), ownershipHtml: $(ConvertTo-Json $ownershipModalHtml -Compress), ownersTitle: $(ConvertTo-Json $ownersModalTitle -Compress), ownersHtml: $(ConvertTo-Json $ownersModalHtml -Compress), ownershipGapTitle: $(ConvertTo-Json $ownershipGapModalTitle -Compress), ownershipGapHtml: $(ConvertTo-Json $ownershipGapModalHtml -Compress) }")
+    $modalDataEntries.Add("`"$safeKey`": { appPermsTitle: $(ConvertTo-Json $appPermsModalTitle -Compress), appPermsHtml: $(ConvertTo-Json $appPermItems -Compress), delegatedPermsTitle: $(ConvertTo-Json $delegatedPermsModalTitle -Compress), delegatedPermsHtml: $(ConvertTo-Json $delegatedPermItems -Compress), rolePermsTitle: $(ConvertTo-Json $rolePermsModalTitle -Compress), rolePermsHtml: $(ConvertTo-Json $rolePermItems -Compress), riskTitle: $(ConvertTo-Json $riskModalTitle -Compress), riskHtml: $(ConvertTo-Json $riskFactorsHtml -Compress), certsTitle: $(ConvertTo-Json $certsModalTitle -Compress), certsHtml: $(ConvertTo-Json $certsModalHtml -Compress), secretsTitle: $(ConvertTo-Json $secretsModalTitle -Compress), secretsHtml: $(ConvertTo-Json $secretsModalHtml -Compress), expiringTitle: $(ConvertTo-Json $expiringModalTitle -Compress), expiringHtml: $(ConvertTo-Json $expiringModalHtml -Compress), expiredTitle: $(ConvertTo-Json $expiredModalTitle -Compress), expiredHtml: $(ConvertTo-Json $expiredModalHtml -Compress), ownershipTitle: $(ConvertTo-Json $ownershipModalTitle -Compress), ownershipHtml: $(ConvertTo-Json $ownershipModalHtml -Compress), ownersTitle: $(ConvertTo-Json $ownersModalTitle -Compress), ownersHtml: $(ConvertTo-Json $ownersModalHtml -Compress), ownershipGapTitle: $(ConvertTo-Json $ownershipGapModalTitle -Compress), ownershipGapHtml: $(ConvertTo-Json $ownershipGapModalHtml -Compress) }")
     $html += @"
-            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
+            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-expired="$expiredValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
                 <td><a class="app-name" href="$portalUrl" target="_blank" title="Open in Entra portal">$safeDisplayName</a></td>
                 <td class="$enabledClass">$enabledText</td>
                 <td><code class="mono">$($app.AppId)</code></td>
                 <td class="$ownershipClass">$ownershipText</td>
                 <td class="$appRegClass">$appRegText</td>
                 <td class="$assignmentRequiredClass">$assignmentRequiredText</td>
-                <td class="$ownersClass cell-sm">$ownersText</td>
+                <td class="$ownersClass cell-sm"><span class="perm-badges">$ownersText</span></td>
                 <td class="cell-sm">$riskBadge</td>
                 <td class="cell-sm"><span class="perm-badges">$permissionSummary</span></td>
-                <td class="cell-sm">$certsBadge $secretsBadge$(if ($expiringBadgeHtml) { " $expiringBadgeHtml" })</td>
+                <td class="cell-sm"><span class="perm-badges">$certsBadge $secretsBadge$(if ($expiringBadgeHtml) { " $expiringBadgeHtml" })$(if ($expiredBadgeHtml) { " $expiredBadgeHtml" })</span></td>
             </tr>
 "@
 }
@@ -2072,7 +2216,7 @@ $html += @"
             required: 'Required', 'not-required': 'Open Access',
             has: 'Has Owners', noowners: 'No Owners', gap: 'Ownership Gap',
             application: 'Application', delegated: 'Delegated', roles: 'Roles', none: 'None',
-            certs: 'Has Certs', secrets: 'Has Secrets', expiring: 'Expiring',
+            certs: 'Has Certs', secrets: 'Has Secrets', expiring: 'Expiring', expired: 'Expired',
             verified: 'Verified', unverified: 'Unverified'
         };
 
@@ -2095,6 +2239,7 @@ $html += @"
                     if (value === 'certs')    return row.dataset.hascerts === 'yes';
                     if (value === 'secrets')  return row.dataset.hassecrets === 'yes';
                     if (value === 'expiring') return row.dataset.expiring === 'yes';
+                    if (value === 'expired')  return row.dataset.expired  === 'yes';
                     return false;
                 case 'enabled':     return row.dataset.enabled === value;
                 case 'permissions': {
@@ -2200,8 +2345,9 @@ $html += @"
             const chips = [];
             for (const group in activeFilters) {
                 activeFilters[group].forEach(v => {
-                    chips.push('<span class="chip" onclick="removeFilter(\'' + group + '\',\'' + v + '\')">'
-                        + groupLabels[group] + ': ' + (valueLabels[v] || v) + ' &times;</span>');
+                    const tagEl = document.querySelector('.filter-tag[data-group="' + group + '"][data-value="' + v + '"]');
+                    const colorClass = tagEl ? (Array.from(tagEl.classList).find(c => c.startsWith('c-')) || '') : '';
+                    chips.push('<span class="chip ' + colorClass + '" onclick="removeFilter(\'' + group + '\',\'' + v + '\')">' + groupLabels[group] + ': ' + (valueLabels[v] || v) + ' &times;</span>');
                 });
             }
             wrap.innerHTML = chips.join('');
@@ -2232,15 +2378,20 @@ $html += @"
         }
 
         let _sortCol = -1, _sortAsc = true;
-        function sortTable(columnIndex, type) {
-            if (_sortCol === columnIndex) {
-                _sortAsc = !_sortAsc;
+        const _modalSortState = {};
+        function sortTable(tableId, columnIndex, type) {
+            const table = document.getElementById(tableId);
+            if (!table) return;
+            let state;
+            if (tableId === 'reportTable') {
+                if (_sortCol === columnIndex) { _sortAsc = !_sortAsc; } else { _sortCol = columnIndex; _sortAsc = type !== 'number'; }
+                state = { col: _sortCol, asc: _sortAsc };
             } else {
-                _sortCol = columnIndex;
-                _sortAsc = type !== 'number';
+                state = _modalSortState[tableId] || { col: -1, asc: true };
+                if (state.col === columnIndex) { state.asc = !state.asc; } else { state.col = columnIndex; state.asc = type !== 'number'; }
+                _modalSortState[tableId] = state;
             }
-            const dir = _sortAsc ? 1 : -1;
-            const table = document.getElementById('reportTable');
+            const dir = state.asc ? 1 : -1;
             const tbody = table.querySelector('tbody');
             const rows = Array.from(tbody.querySelectorAll('tr'));
 
@@ -2257,11 +2408,11 @@ $html += @"
 
             rows.forEach(row => tbody.appendChild(row));
 
-            document.querySelectorAll('#reportTable thead th').forEach(th => {
+            table.querySelectorAll('thead th').forEach(th => {
                 th.classList.remove('sort-asc', 'sort-desc');
             });
-            document.querySelectorAll('#reportTable thead th')[columnIndex]
-                ?.classList.add(_sortAsc ? 'sort-asc' : 'sort-desc');
+            table.querySelectorAll('thead th')[columnIndex]
+                ?.classList.add(state.asc ? 'sort-asc' : 'sort-desc');
         }
 
         function exportCsv() {
@@ -2304,6 +2455,11 @@ $html += @"
             document.getElementById('detailModalOverlay').classList.add('active');
             document.querySelector('#detailModalOverlay .modal-box').scrollTop = 0;
             document.querySelector('.modal-close').focus();
+            delete _modalSortState['certsModalTable'];
+            delete _modalSortState['secretsModalTable'];
+            delete _modalSortState['expiringModalTable'];
+            delete _modalSortState['expiredModalTable'];
+            delete _modalSortState['ownersModalTable'];
         }
 
         function closeDetailModal() {
@@ -2363,7 +2519,7 @@ $html += @"
     </div>
 
     <footer class="report-footer">
-        Found this tool helpful? Subscribe to my blog at <a href="https://www.matej.guru" target="_blank" rel="noopener">www.matej.guru</a>. This script is provided "as is", without any warranty.
+        Copyright &copy; 2026 <a href="https://www.matej.guru/about" target="_blank" rel="noopener">Matej Klemencic</a>
     </footer>
 </body>
 </html>
