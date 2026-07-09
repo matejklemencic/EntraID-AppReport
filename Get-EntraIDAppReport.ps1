@@ -1664,57 +1664,57 @@ $html = @"
             <div class="number">$totalApps</div>
             <div class="subtitle">Enterprise Applications analyzed</div>
         </div>
-        <div class="summary-card" data-fg="risk" data-fv="Critical" title="Critical risk apps require immediate review. They have a combination of high privilege permissions, active credentials and missing controls. Click to filter.">
+        <div class="summary-card" data-fg="risk" data-fv="Critical" title="Highest risk tier. Immediate review recommended. Click to filter.">
             <h3>Critical Risk</h3>
             <div class="number">$criticalRiskApps</div>
             <div class="subtitle">Applications requiring immediate attention</div>
         </div>
-        <div class="summary-card" data-fg="risk" data-fv="High" title="High risk apps have elevated permissions or missing security controls that should be reviewed. Click to filter.">
+        <div class="summary-card" data-fg="risk" data-fv="High" title="Elevated risk tier. Review recommended. Click to filter.">
             <h3>High Risk</h3>
             <div class="number">$highRiskApps</div>
             <div class="subtitle">Applications with elevated risk scores</div>
         </div>
-        <div class="summary-card" data-fg="risk" data-fv="Medium" title="Medium risk apps have some risk factors present. Review the risk analysis for details. Click to filter.">
+        <div class="summary-card" data-fg="risk" data-fv="Medium" title="Moderate risk tier. Review when convenient. Click to filter.">
             <h3>Medium Risk</h3>
             <div class="number">$mediumRiskApps</div>
             <div class="subtitle">Applications with moderate risk scores</div>
         </div>
-        <div class="summary-card" data-fg="risk" data-fv="Low" title="Low risk apps have no significant security concerns detected. Click to filter.">
+        <div class="summary-card" data-fg="risk" data-fv="Low" title="Lowest risk tier. No immediate action needed. Click to filter.">
             <h3>Low Risk</h3>
             <div class="number">$lowRiskApps</div>
             <div class="subtitle">Applications with minimal risk</div>
         </div>
-        <div class="summary-card" data-fg="ownership" data-fv="internal" title="Apps registered in this tenant and owned by your organization. Click to filter.">
+        <div class="summary-card" data-fg="ownership" data-fv="internal" title="Registered and owned by this organization. Click to filter.">
             <h3>Internal Apps</h3>
             <div class="number">$internalApps</div>
-            <div class="subtitle">Apps owned by your organization</div>
+            <div class="subtitle">Apps owned by this organization</div>
         </div>
-        <div class="summary-card" data-fg="ownership" data-fv="microsoft" title="First party Microsoft applications. These are owned and operated by Microsoft. Click to filter.">
+        <div class="summary-card" data-fg="ownership" data-fv="microsoft" title="First-party Microsoft applications. Click to filter.">
             <h3>Microsoft Apps</h3>
             <div class="number">$microsoftApps</div>
             <div class="subtitle">First-party Microsoft services</div>
         </div>
-        <div class="summary-card" data-fg="ownership" data-fv="third-party" title="Apps registered in another tenant by a third party. Click to filter.">
+        <div class="summary-card" data-fg="ownership" data-fv="third-party" title="Registered in another tenant by a third party. Click to filter.">
             <h3>Third-Party Apps</h3>
             <div class="number">$externalApps</div>
             <div class="subtitle">Third-party external applications</div>
         </div>
-        <div class="summary-card" data-fg="credentials" data-fv="expiring" title="Apps with certificates or secrets expiring within 30 days. Renew them to avoid authentication failures. Click to filter.">
+        <div class="summary-card" data-fg="credentials" data-fv="expiring" title="Certificates or secrets expiring within 30 days. Click to filter.">
             <h3>Expiring Credentials</h3>
             <div class="number">$appsWithExpiringCredentials</div>
             <div class="subtitle">Apps with credentials expiring soon</div>
         </div>
-        <div class="summary-card" data-fg="owners" data-fv="gap" title="Not all owners are assigned to both the Service Principal and the App Registration. Click to filter.">
+        <div class="summary-card" data-fg="owners" data-fv="gap" title="Owners missing on either the Service Principal or App Registration. Click to filter.">
             <h3>Ownership Gaps</h3>
             <div class="number">$appsWithOwnershipGaps</div>
             <div class="subtitle">Apps with ownership inconsistencies</div>
         </div>
-        <div class="summary-card" data-fg="assignment" data-fv="not-required" title="All users in the tenant can access this app without explicit assignment. Click to filter.">
+        <div class="summary-card" data-fg="assignment" data-fv="not-required" title="Any user can access without explicit assignment. Click to filter.">
             <h3>Open Access</h3>
             <div class="number">$appsWithOpenAccess</div>
             <div class="subtitle">Apps with no assignment required</div>
         </div>
-        <div class="summary-card" data-fg="enabled" data-fv="no" title="User sign-in is blocked for these applications. They are visible in the tenant but cannot be used. Click to filter.">
+        <div class="summary-card" data-fg="enabled" data-fv="no" title="Sign-in blocked. Click to filter.">
             <h3>Disabled Apps</h3>
             <div class="number">$disabledApps</div>
             <div class="subtitle">Apps with sign-in disabled</div>
@@ -1819,8 +1819,8 @@ $modalDataEntries = [System.Collections.Generic.List[string]]::new()
 foreach ($app in $sortedReport) {
     $riskClass = "risk-" + $app.RiskLevel.ToLower()
     $appRegClass = if ($app.HasAppRegistration) { "has-app-reg" } else { "sp-only" }
-    $appRegText = if ($app.HasAppRegistration) { "<span class='badge green clickable-badge' data-fg='appreg' data-fv='yes' title='This service principal has a linked App Registration in this tenant'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='appreg' data-fv='no' title='Service principal only with no App Registration found in this tenant'>No</span>" }
-    $enabledText = if ($app.IsEnabled) { "<span class='badge green clickable-badge' data-fg='enabled' data-fv='yes' title='Users can sign in and the application is active in this tenant'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='enabled' data-fv='no' title='User sign-in is blocked for this application. It is visible in the tenant but cannot be used'>No</span>" }
+    $appRegText = if ($app.HasAppRegistration) { "<span class='badge green clickable-badge' data-fg='appreg' data-fv='yes' title='Has a linked App Registration in this tenant.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='appreg' data-fv='no' title='Service principal only. No App Registration found.'>No</span>" }
+    $enabledText = if ($app.IsEnabled) { "<span class='badge green clickable-badge' data-fg='enabled' data-fv='yes' title='Active. Users can sign in to this application.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='enabled' data-fv='no' title='Sign in blocked. Visible in the tenant but cannot be used.'>No</span>" }
     $portalUrl = "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/$($app.ServicePrincipalId)/appId/$($app.AppId)"
     $enabledClass = if ($app.IsEnabled) { "app-enabled" } else { "app-disabled" }
     
@@ -1829,9 +1829,9 @@ foreach ($app in $sortedReport) {
     $isMicrosoft = $app.AppOwnerOrganizationId -in $script:MicrosoftTenantIds
     $ownershipType = if ($isInternal) { "internal" } elseif ($isMicrosoft) { "microsoft" } else { "third-party" }
     $ownershipText = switch ($ownershipType) {
-        "internal"    { "<span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App registered in this tenant and owned by your organization'>Internal</span>" }
-        "microsoft"   { "<span class='badge blue' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App owned by Microsoft. This is a first party Microsoft service'>Microsoft</span>" }
-        "third-party" { "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='App registered in another tenant. This is a third party service'>Third-Party</span>" }
+        "internal"    { "<span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='Registered and owned by this organization.'>Internal</span>" }
+        "microsoft"   { "<span class='badge blue' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='First party Microsoft service.'>Microsoft</span>" }
+        "third-party" { "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='Registered in another tenant by a third party.'>Third-Party</span>" }
     }
     $ownershipClass = switch ($ownershipType) {
         "internal"    { "internal-app" }
@@ -1845,7 +1845,7 @@ foreach ($app in $sortedReport) {
             $vpName = ConvertTo-HtmlSafe $app.VerifiedPublisherName
             $ownershipText += "<div style='margin-top:4px'><span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='Microsoft-verified publisher: $vpName. Click to view details'>Verified Publisher</span></div>"
         } else {
-            $ownershipText += "<div style='margin-top:4px'><span class='badge red' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='No Microsoft-verified publisher. The developer identity behind this app has not been verified. Click to view details'>Unverified Publisher</span></div>"
+            $ownershipText += "<div style='margin-top:4px'><span class='badge red' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipTitle,reportDetails['$($app.AppId)'].ownershipHtml)`" style='cursor:pointer' title='Developer identity not verified by Microsoft. Click to view details.'>Unverified Publisher</span></div>"
         }
     }
 
@@ -1857,7 +1857,7 @@ foreach ($app in $sortedReport) {
     }
     
     # Determine assignment requirement
-    $assignmentRequiredText = if ($app.AssignmentRequired) { "<span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Users and groups must be explicitly assigned to access this app'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='All users in the tenant can access this app without explicit assignment'>No</span>" }
+    $assignmentRequiredText = if ($app.AssignmentRequired) { "<span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Explicit user or group assignment required to access.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='Any user can access without assignment.'>No</span>" }
     $assignmentRequiredClass = if ($app.AssignmentRequired) { "assignment-required" } else { "assignment-not-required" }
     
     # Format owners with enhanced information
@@ -1865,11 +1865,11 @@ foreach ($app in $sortedReport) {
         $spOwnerCount = $app.ServicePrincipalOwners.Count
         $appRegOwnerCount = $app.AppRegistrationOwners.Count
 
-        $ownerDisplay = "<span class='badge blue' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownersTitle,reportDetails['$($app.AppId)'].ownersHtml)`" style='cursor:pointer' title='Users or service principals responsible for managing this app — click to view details'>$($app.Owners.Count) owner(s)</span> "
+        $ownerDisplay = "<span class='badge blue' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownersTitle,reportDetails['$($app.AppId)'].ownersHtml)`" style='cursor:pointer' title='Responsible for managing this app. Click to view details.'>$($app.Owners.Count) owner(s)</span> "
 
         $isInternalApp = $app.AppOwnerOrganizationId -eq $tenantId
         if ($app.OwnershipGap -and $isInternalApp) {
-            $ownerDisplay += "<span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipGapTitle,reportDetails['$($app.AppId)'].ownershipGapHtml)`" style='cursor:pointer' title='Not all owners are assigned to both the Service Principal and the App Registration — click to view details'>Ownership Gap</span>"
+            $ownerDisplay += "<span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ownershipGapTitle,reportDetails['$($app.AppId)'].ownershipGapHtml)`" style='cursor:pointer' title='Owners missing on either the Service Principal or App Registration. Click to view details.'>Ownership Gap</span>"
         }
         $ownerDisplay
     } else {
@@ -1887,22 +1887,22 @@ foreach ($app in $sortedReport) {
     }
     
     if ($app.ActiveCertificates -gt 0) {
-        $certsBadge = "<span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].certsTitle,reportDetails['$($app.AppId)'].certsHtml)`" style='cursor:pointer' title='Active certificate credentials — click to view details'>Certs: $($app.ActiveCertificates)</span>"
+        $certsBadge = "<span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].certsTitle,reportDetails['$($app.AppId)'].certsHtml)`" style='cursor:pointer' title='Active certificate credentials. Click to view details.'>Certs: $($app.ActiveCertificates)</span>"
     } else {
         $certsBadge = "<span class='badge gray' title='No active certificates'>Certs: 0</span>"
     }
     if ($app.ActiveSecrets -gt 0) {
-        $secretsBadge = "<span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].secretsTitle,reportDetails['$($app.AppId)'].secretsHtml)`" style='cursor:pointer' title='Active client secret credentials — click to view details'>Secrets: $($app.ActiveSecrets)</span>"
+        $secretsBadge = "<span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].secretsTitle,reportDetails['$($app.AppId)'].secretsHtml)`" style='cursor:pointer' title='Active client secret credentials. Click to view details.'>Secrets: $($app.ActiveSecrets)</span>"
     } else {
         $secretsBadge = "<span class='badge gray' title='No active secrets'>Secrets: 0</span>"
     }
     $expiringBadgeHtml = ""
     if ($app.ExpiringCredentials -gt 0) {
-        $expiringBadgeHtml = "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].expiringTitle,reportDetails['$($app.AppId)'].expiringHtml)`" style='cursor:pointer' title='Credentials expiring within 30 days. Renew them to avoid authentication failures — click to view details'>Expiring: $($app.ExpiringCredentials)</span>"
+        $expiringBadgeHtml = "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].expiringTitle,reportDetails['$($app.AppId)'].expiringHtml)`" style='cursor:pointer' title='Expiring within 30 days. Renew to avoid authentication failures. Click to view details.'>Expiring: $($app.ExpiringCredentials)</span>"
     }
     $expiredBadgeHtml = ""
     if ($app.ExpiredCredentials -gt 0) {
-        $expiredBadgeHtml = "<span class='badge red' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].expiredTitle,reportDetails['$($app.AppId)'].expiredHtml)`" style='cursor:pointer' title='Credentials that have already expired and should be removed or renewed — click to view details'>Expired: $($app.ExpiredCredentials)</span>"
+        $expiredBadgeHtml = "<span class='badge red' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].expiredTitle,reportDetails['$($app.AppId)'].expiredHtml)`" style='cursor:pointer' title='Already expired. Should be removed or renewed. Click to view details.'>Expired: $($app.ExpiredCredentials)</span>"
     }
     $hasCertsValue = if ($app.ActiveCertificates -gt 0) { "yes" } else { "no" }
     $hasSecretsValue = if ($app.ActiveSecrets -gt 0) { "yes" } else { "no" }
@@ -2040,13 +2040,13 @@ foreach ($app in $sortedReport) {
 
     # Permission badges — badge itself is the modal trigger when count > 0
     $appPermBadge = if ($app.ApplicationPermissions -gt 0) {
-        "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$safeKey'].appPermsTitle,reportDetails['$safeKey'].appPermsHtml)`" style='cursor:pointer' title='Application permissions grant access without a signed-in user and are typically high privilege'>App: $($app.ApplicationPermissions)</span>"
+        "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$safeKey'].appPermsTitle,reportDetails['$safeKey'].appPermsHtml)`" style='cursor:pointer' title='Runs with app identity. Typically high privilege.'>App: $($app.ApplicationPermissions)</span>"
     } else { "<span class='badge gray'>App: 0</span>" }
     $delegatedPermBadge = if ($app.DelegatedPermissions -gt 0) {
         "<span class='badge blue' onclick=`"openDetailModal(reportDetails['$safeKey'].delegatedPermsTitle,reportDetails['$safeKey'].delegatedPermsHtml)`" style='cursor:pointer' title='Delegated permissions act on behalf of a signed-in user'>Delegated: $($app.DelegatedPermissions)</span>"
     } else { "<span class='badge gray'>Delegated: 0</span>" }
     $rolePermBadge = if ($app.DirectoryRoles -gt 0) {
-        "<span class='badge red' onclick=`"openDetailModal(reportDetails['$safeKey'].rolePermsTitle,reportDetails['$safeKey'].rolePermsHtml)`" style='cursor:pointer' title='App has been assigned Entra ID directory roles which grant broad administrative capabilities'>Roles: $($app.DirectoryRoles)</span>"
+        "<span class='badge red' onclick=`"openDetailModal(reportDetails['$safeKey'].rolePermsTitle,reportDetails['$safeKey'].rolePermsHtml)`" style='cursor:pointer' title='Directory role assigned. Grants broad administrative capabilities.'>Roles: $($app.DirectoryRoles)</span>"
     } else { "<span class='badge gray'>Roles: 0</span>" }
     $permissionSummary = "$appPermBadge $delegatedPermBadge $rolePermBadge"
     $riskTitle = switch ($app.RiskLevel) {
@@ -2560,7 +2560,7 @@ if ($DryRun) {
 # Display summary statistics in console
 Write-Host "`n=== REPORT SUMMARY ===" -ForegroundColor Cyan
 Write-Host "Total Applications: $totalApps" -ForegroundColor White
-Write-Host "  - Internal Apps (Your Org): $internalApps" -ForegroundColor Blue
+Write-Host "  - Internal Apps (This Org): $internalApps" -ForegroundColor Blue
 Write-Host "  - External Apps (Third-party): $externalApps" -ForegroundColor DarkYellow
 Write-Host "  - With App Registrations: $appsWithRegistrations" -ForegroundColor Green
 Write-Host "  - Service Principals Only: $servicePrincipalsOnly" -ForegroundColor Yellow
