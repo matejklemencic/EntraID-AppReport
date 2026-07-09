@@ -586,35 +586,34 @@ function Get-ApplicationCredentials {
     $expiryThreshold = $now.AddDays(30)
 
     # Service Principal's own credentials (can be assigned directly, e.g. via PowerShell, even without an App Registration)
-    $spActiveSecrets = @($ServicePrincipal.PasswordCredentials | Where-Object { $_.EndDateTime -gt $now })
-    $spActiveCerts   = @($ServicePrincipal.KeyCredentials | Where-Object { $_.EndDateTime -gt $now })
-    $spExpiring      = @(@($ServicePrincipal.PasswordCredentials) + @($ServicePrincipal.KeyCredentials) | Where-Object {
+    $spActiveSecrets  = @($ServicePrincipal.PasswordCredentials | Where-Object { $_.EndDateTime -gt $now })
+    $spActiveCerts    = @($ServicePrincipal.KeyCredentials | Where-Object { $_.EndDateTime -gt $now })
+    $spExpiring       = @(@($ServicePrincipal.PasswordCredentials) + @($ServicePrincipal.KeyCredentials) | Where-Object {
         $_.EndDateTime -gt $now -and $_.EndDateTime -lt $expiryThreshold
     })
-    $spExpired       = @(@($ServicePrincipal.PasswordCredentials) + @($ServicePrincipal.KeyCredentials) | Where-Object {
-        $_.EndDateTime -ne $null -and $_.EndDateTime -le $now
-    })
+    $spExpiredSecrets = @($ServicePrincipal.PasswordCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now })
+    $spExpiredCerts   = @($ServicePrincipal.KeyCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now })
 
     $hasAppReg = $false
     $appRegId = $null
-    $appActiveSecrets = @()
-    $appActiveCerts = @()
-    $appExpiring = @()
-    $appExpired  = @()
+    $appActiveSecrets  = @()
+    $appActiveCerts    = @()
+    $appExpiring       = @()
+    $appExpiredSecrets = @()
+    $appExpiredCerts   = @()
 
     try {
         $app = Get-MgApplication -Filter "appId eq '$AppId'" -Property "Id,PasswordCredentials,KeyCredentials" -ErrorAction SilentlyContinue
         if ($app) {
             $hasAppReg = $true
             $appRegId = $app.Id
-            $appActiveSecrets = @($app.PasswordCredentials | Where-Object { $_.EndDateTime -gt $now })
-            $appActiveCerts   = @($app.KeyCredentials | Where-Object { $_.EndDateTime -gt $now })
-            $appExpiring      = @(@($app.PasswordCredentials) + @($app.KeyCredentials) | Where-Object {
+            $appActiveSecrets  = @($app.PasswordCredentials | Where-Object { $_.EndDateTime -gt $now })
+            $appActiveCerts    = @($app.KeyCredentials | Where-Object { $_.EndDateTime -gt $now })
+            $appExpiring       = @(@($app.PasswordCredentials) + @($app.KeyCredentials) | Where-Object {
                 $_.EndDateTime -gt $now -and $_.EndDateTime -lt $expiryThreshold
             })
-            $appExpired       = @(@($app.PasswordCredentials) + @($app.KeyCredentials) | Where-Object {
-                $_.EndDateTime -ne $null -and $_.EndDateTime -le $now
-            })
+            $appExpiredSecrets = @($app.PasswordCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now })
+            $appExpiredCerts   = @($app.KeyCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now })
         }
     }
     catch {
@@ -624,7 +623,7 @@ function Get-ApplicationCredentials {
     $totalActiveSecrets = $spActiveSecrets.Count + $appActiveSecrets.Count
     $totalActiveCerts   = $spActiveCerts.Count + $appActiveCerts.Count
     $totalExpiring      = $spExpiring.Count + $appExpiring.Count
-    $totalExpired       = $spExpired.Count + $appExpired.Count
+    $totalExpired       = $spExpiredSecrets.Count + $spExpiredCerts.Count + $appExpiredSecrets.Count + $appExpiredCerts.Count
 
     # Long-lived: any active credential with expiry > 1 year from now
     $longLivedThreshold = $now.AddDays(365)
@@ -642,8 +641,10 @@ function Get-ApplicationCredentials {
         UsesPasswordSecrets  = ($totalActiveSecrets -gt 0)
         SecretCount          = $totalActiveSecrets
         HasLongLivedCredentials = $hasLongLived
-        ActiveCertificateList = @($spActiveCerts) + @($appActiveCerts)
-        ActiveSecretList      = @($spActiveSecrets) + @($appActiveSecrets)
+        ActiveCertificateList  = @($spActiveCerts) + @($appActiveCerts)
+        ActiveSecretList       = @($spActiveSecrets) + @($appActiveSecrets)
+        ExpiredCertificateList = @($spExpiredCerts) + @($appExpiredCerts)
+        ExpiredSecretList      = @($spExpiredSecrets) + @($appExpiredSecrets)
     }
 }
 
@@ -1045,6 +1046,8 @@ foreach ($sp in $servicePrincipals) {
         HasLongLivedCredentials = $credentials.HasLongLivedCredentials
         ActiveCertificateList   = $credentials.ActiveCertificateList
         ActiveSecretList        = $credentials.ActiveSecretList
+        ExpiredCertificateList  = $credentials.ExpiredCertificateList
+        ExpiredSecretList       = $credentials.ExpiredSecretList
         
         # Risk assessment
         RiskScore = $riskAssessment.Score
@@ -2089,7 +2092,13 @@ foreach ($app in $sortedReport) {
     if ($app.ActiveSecretList)      { $allCredsForStatus += ($app.ActiveSecretList      | ForEach-Object { [PSCustomObject]@{ Kind = "Secret";      DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
     $credStatusNow = Get-Date
     $expiringCredList = @($allCredsForStatus | Where-Object { $_.EndDateTime -and $_.EndDateTime -gt $credStatusNow -and $_.EndDateTime -lt $credStatusNow.AddDays(30) })
-    $expiredCredList  = @($allCredsForStatus | Where-Object { $_.EndDateTime -and $_.EndDateTime -le $credStatusNow })
+
+    # Expired credentials are excluded from the Active* lists above, so they must be sourced
+    # from the dedicated Expired* lists returned by Get-ApplicationCredentials.
+    $allExpiredCredsForStatus = @()
+    if ($app.ExpiredCertificateList) { $allExpiredCredsForStatus += ($app.ExpiredCertificateList | ForEach-Object { [PSCustomObject]@{ Kind = "Certificate"; DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
+    if ($app.ExpiredSecretList)      { $allExpiredCredsForStatus += ($app.ExpiredSecretList      | ForEach-Object { [PSCustomObject]@{ Kind = "Secret";      DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
+    $expiredCredList  = @($allExpiredCredsForStatus | Where-Object { $_.EndDateTime -and $_.EndDateTime -le $credStatusNow })
 
     $expiringModalTitle = "Expiring Credentials for $($app.DisplayName) ($($expiringCredList.Count))"
     if ($expiringCredList.Count -gt 0) {
