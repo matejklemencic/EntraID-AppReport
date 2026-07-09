@@ -352,6 +352,7 @@ $internalApps          = @($report | Where-Object { $_.AppOwnerOrganizationId -e
 $microsoftApps         = @($report | Where-Object { $_.AppOwnerOrganizationId -in $script:MicrosoftTenantIds }).Count
 $externalApps          = @($report | Where-Object { $_.AppOwnerOrganizationId -ne $tenantId -and $_.AppOwnerOrganizationId -notin $script:MicrosoftTenantIds }).Count
 $appsWithOwnershipGaps = @($report | Where-Object { $_.OwnershipGap -eq $true }).Count
+$appsWithExpiringCredentials = @($report | Where-Object { $_.ExpiringCredentials -gt 0 }).Count
 $appsWithOpenAccess    = @($report | Where-Object { $_.AssignmentRequired -eq $false }).Count
 $disabledApps          = @($report | Where-Object { $_.IsEnabled -eq $false }).Count
 

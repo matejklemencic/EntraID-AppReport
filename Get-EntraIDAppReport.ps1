@@ -1325,6 +1325,7 @@ $html = @"
         .summary-card[data-fv="microsoft"].number  { color: #0078d4; }
         .summary-card[data-fv="third-party"] .number { color: #c50f1f; }
         .summary-card[data-fv="gap"]      .number { color: #b06000; }
+        .summary-card[data-fv="expiring"] .number { color: #d83b01; }
         .summary-card[data-fv="not-required"] .number { color: #767676; }
         .summary-card[data-fv="no"][data-fg="enabled"] .number { color: #767676; }
         /* Border colors matching number colors */
@@ -1336,6 +1337,7 @@ $html = @"
         .summary-card[data-fv="microsoft"]           { border-top-color: #0078d4; }
         .summary-card[data-fv="third-party"]         { border-top-color: #c50f1f; }
         .summary-card[data-fv="gap"]                 { border-top-color: #b06000; }
+        .summary-card[data-fv="expiring"]            { border-top-color: #d83b01; }
         .summary-card[data-fv="not-required"]        { border-top-color: #767676; }
         .summary-card[data-fv="no"][data-fg="enabled"] { border-top-color: #767676; }
         [data-theme="dark"] .summary-card[data-fv="Critical"] .number { color: #e3223a; }
@@ -1344,12 +1346,14 @@ $html = @"
         [data-theme="dark"] .summary-card[data-fv="Low"]      .number { color: #2a9d2a; }
         [data-theme="dark"] .summary-card[data-fv="internal"] .number { color: #2a9d2a; }
         [data-theme="dark"] .summary-card[data-fv="third-party"] .number { color: #e3223a; }
+        [data-theme="dark"] .summary-card[data-fv="expiring"] .number { color: #f0571f; }
         [data-theme="dark"] .summary-card[data-fv="Critical"]  { border-top-color: #e3223a; }
         [data-theme="dark"] .summary-card[data-fv="High"]      { border-top-color: #f0571f; }
         [data-theme="dark"] .summary-card[data-fv="Medium"]    { border-top-color: #c87000; }
         [data-theme="dark"] .summary-card[data-fv="Low"]       { border-top-color: #2a9d2a; }
         [data-theme="dark"] .summary-card[data-fv="internal"]  { border-top-color: #2a9d2a; }
         [data-theme="dark"] .summary-card[data-fv="third-party"] { border-top-color: #e3223a; }
+        [data-theme="dark"] .summary-card[data-fv="expiring"] { border-top-color: #f0571f; }
         .summary-card .subtitle { color: var(--text-muted); font-size: 12.5px; }
 
         /* -- Controls -- */
@@ -1694,6 +1698,11 @@ $html = @"
             <h3>Third-Party Apps</h3>
             <div class="number">$externalApps</div>
             <div class="subtitle">Third-party external applications</div>
+        </div>
+        <div class="summary-card" data-fg="credentials" data-fv="expiring" title="Apps with certificates or secrets expiring within 30 days. Renew them to avoid authentication failures. Click to filter.">
+            <h3>Expiring Credentials</h3>
+            <div class="number">$appsWithExpiringCredentials</div>
+            <div class="subtitle">Apps with credentials expiring soon</div>
         </div>
         <div class="summary-card" data-fg="owners" data-fv="gap" title="Not all owners are assigned to both the Service Principal and the App Registration. Click to filter.">
             <h3>Ownership Gaps</h3>
