@@ -47,6 +47,9 @@ $script:MicrosoftTenantIds = @(
     'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'
 )
 
+# Mirrors $ScriptVersion from Get-EntraIDAppReport.ps1, needed by the footer in the rendering block
+$ScriptVersion = 'V26.07.12'
+
 # ---------------------------------------------------------------------------
 # Mock tenant + application data
 # ---------------------------------------------------------------------------

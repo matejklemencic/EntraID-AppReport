@@ -119,6 +119,9 @@ if (($ClientId -or $CertificateThumbprint) -and -not $TenantId) {
 # Make all unhandled errors terminating so they propagate through the try/catch/finally structure
 $ErrorActionPreference = 'Stop'
 
+# Script version — keep in sync with the .NOTES header above; surfaced in the report footer
+$ScriptVersion = 'V26.07.12'
+
 # Microsoft first-party tenant IDs — used to classify Microsoft-owned apps
 $script:MicrosoftTenantIds = @(
     'f8cdef31-a31e-4b4a-93e4-5f571e91255a',  # Microsoft Services
@@ -2630,7 +2633,7 @@ $html += @"
     </div>
 
     <footer class="report-footer">
-        Copyright &copy; 2026 <a href="https://www.matej.guru/about" target="_blank" rel="noopener">Matej Klemencic</a>
+        Copyright &copy; 2026 <a href="https://www.matej.guru/about" target="_blank" rel="noopener">Matej Klemencic</a> &middot; $ScriptVersion
     </footer>
 </body>
 </html>
