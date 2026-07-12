@@ -3,14 +3,14 @@
     Generates an interactive HTML security report for Microsoft Entra ID Enterprise Applications.
 .DESCRIPTION
     This script connects to Microsoft Graph, retrieves Enterprise Applications (Service Principals),
-    analyzes permissions, credentials and ownership, calculates risk scores and produces a filterable
-    interactive HTML report with badge-based visualizations and deep links to the Entra portal.
+    analyzes permissions (including Admin vs. User consent type), credentials and ownership, calculates
+    risk scores and produces a filterable interactive HTML report with badge-based visualizations and
+    deep links to the Entra portal and Microsoft Learn.
     Includes ownership checking for both Service Principals and App Registrations.
 .AUTHOR
     Matej Klemencic (www.matej.guru)
 .NOTES
-    Version:        1.5
-    Last Modified:  2026-06-28
+    Version:        V26.07.12
 
     Installation: Install the required Microsoft Graph modules (install each separately to use -MinimumVersion):
     @('Microsoft.Graph.Authentication','Microsoft.Graph.Applications','Microsoft.Graph.Identity.SignIns','Microsoft.Graph.Identity.DirectoryManagement','Microsoft.Graph.Users') | ForEach-Object { Install-Module $_ -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber }

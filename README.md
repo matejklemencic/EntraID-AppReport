@@ -7,6 +7,7 @@ Generates an interactive, self-contained HTML security report for all Enterprise
 The script connects to Microsoft Graph, retrieves every Enterprise Application registered or consented to in the tenant, and analyses each one across several dimensions:
 
 - **Permissions**: application permissions (app roles) and delegated permissions (OAuth2 grants), including the resource they are granted against
+- **Consent type**: each delegated permission is tagged as tenant-wide **Admin Consent** or self-service **User Consent**, with a per-user consent count shown for user-consented permissions (mirroring the Entra portal's Permissions > User consent view)
 - **Directory roles**: Entra ID directory roles assigned directly to the service principal
 - **Ownership**: owners on both the Service Principal and its backing App Registration, with gap detection when the two ownership sets diverge; owners are tracked separately for the Enterprise App and the App Registration
 - **Credentials**: active certificates and client secrets on the App Registration counted separately, including expiry detection within 30 days, already-expired credential detection, and long-lived credential detection
@@ -21,15 +22,15 @@ The output is a single `.html` file that works offline with no external dependen
 
 | Feature | Detail |
 |---------|--------|
-| Summary cards | Clickable cards for risk levels, ownership, registration type, and assignment, each filtering the table |
+| Summary cards | Clickable cards for total apps, risk levels, ownership type, unverified publishers, expiring credentials, ownership gaps, and disabled apps, each filtering the table |
 | Search | Debounced real-time text search across application name, App ID, owner, and permission |
-| Filter panel | Multi-dimensional filter tags for ownership, publisher verification, risk, credentials, permissions, assignment, and enabled state |
+| Filter panel | Multi-dimensional filter tags for enabled state, ownership, publisher verification, App Registration, assignment, owners, risk, permissions, consent type, and credentials |
 | Column sort | Click any sortable column header to sort ascending; click again to reverse |
 | Export CSV | Downloads the currently visible (filtered) rows as a `.csv` file, UTF-8 with BOM for correct Excel rendering |
 | Dark / light mode | Toggle persisted to `localStorage`; a GitHub repo link icon sits next to the toggle in the header |
 | Portal deep links | Application name links directly to the Entra portal entry for that app |
 | Detail modals | Clickable badges throughout the report open a detail panel with full information — see [Interactive badges](#interactive-badges) |
-| Risk score visual scale | The Risk Analysis modal shows a segmented threshold bar (Low/Medium/High/Critical) with a marker at the app's actual score |
+| Risk score visual scale | The Risk Analysis modal shows a segmented threshold bar (Low/Medium/High/Critical) with a marker at the app's actual score; disabled apps show a muted grey badge/gauge and a status banner instead of full color, since the score reflects inherent (not currently exploitable) risk |
 
 ## Example
 
@@ -44,9 +45,9 @@ Most badges in the report table are clickable and open a detail modal with addit
 | App Ownership | Internal / Microsoft / Third-Party | Ownership type, publisher verification (third-party only), and owner tenant ID |
 | App Ownership | Verified Publisher / Unverified Publisher | Shown under the Third-Party badge only. Opens the same App Ownership modal as the Third-Party badge |
 | Permissions | App: N | Full list of application permissions with resource; each permission links to the Graph Permissions Explorer |
-| Permissions | Delegated: N | Full list of delegated permissions with resource; each permission links to the Graph Permissions Explorer |
+| Permissions | Delegated: N | Full list of delegated permissions with resource; each permission links to the Graph Permissions Explorer. Each entry also shows a consent badge — **Admin Consent** (tenant-wide) or **N user(s) consented** (self-service) — that filters the table by consent type when clicked |
 | Permissions | Roles: N | Full list of directory roles assigned to the service principal; each role links to the Microsoft Learn built-in roles reference |
-| Risk | Critical / High / Medium / Low | A score header (large point total plus the risk-level badge) followed by every contributing signal, sorted highest-to-lowest with individual point values, and a visual threshold scale bar showing where the score falls between Low/Medium/High/Critical; permission factors link to the Graph Permissions Explorer, directory-role factors link to Microsoft Learn, and some factors carry a hover tooltip |
+| Risk | Critical / High / Medium / Low | A score header (large point total plus the risk-level badge) followed by every contributing signal, sorted highest-to-lowest with individual point values, and a visual threshold scale bar showing where the score falls between Low/Medium/High/Critical; permission factors link to the Graph Permissions Explorer, directory-role factors link to Microsoft Learn, the two "Assignment not required" factors and the unverified-publisher factor link to the relevant Microsoft Learn article, and some factors carry a hover tooltip (rendered as a small info icon) with extra guidance. For disabled apps, the badge and gauge are shown in muted grey with a banner explaining the score reflects inherent risk only |
 | Credentials | Certs: N | Sortable table of each active certificate: display name, valid from, expiry date (highlighted if expiring/expired), and Key ID |
 | Credentials | Secrets: N | Sortable table of each active client secret: display name, created date, expiry date (highlighted if expiring/expired), and Key ID |
 | Credentials | Expiring: N | Sortable table of only the certificates/secrets expiring within 30 days, across both types |
@@ -195,7 +196,7 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 | Each unique medium-risk permission (e.g. `Directory.Read.All`, `Mail.Send`) | +5 |
 | Each other directory role | +5 |
 | Has any application permissions (bonus, counted once) | +5 |
-| Sensitive permissions assigned to all users | +5 |
+| Sensitive permission granted via Admin Consent, tenant-wide (all users exposed) | +5 |
 | Assignment not required (open access, non high-value app) | +5 |
 | Uses password secrets instead of certificates | +5 |
 | Multiple secrets configured | +5 |
@@ -203,17 +204,18 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 | External application (registered in another tenant, not Microsoft) | +5 |
 | External application without a Microsoft-verified publisher | +5 |
 | No owners on either Service Principal or App Registration | +4 |
-| Sensitive permissions affecting more than 50 users | +3 |
+| Sensitive permission granted via User Consent, no admin review (governance blind spot) — flat, regardless of how many users consented | +3 |
 | No Service Principal owners (App Registration owners only) | +2 |
 | No App Registration owners (Service Principal owners only) | +2 |
-| Ownership gap (SP and App Reg owner sets differ) | +1 |
 | Suspicious keyword in display name (e.g. `test`, `admin`, `temp`, `legacy`) | +2 |
-| App is disabled (informational only — no score change) | 0 |
+| Ownership gap (SP and App Reg owner sets differ) | +1 |
 
 Notes:
 
 - The high-value factor (+50) and the generic "assignment not required" factor (+5) are mutually exclusive — a high-value app records only the single higher factor.
 - An external, unverified third-party app accumulates both the external (+5) and unverified-publisher (+5) factors.
+- The Admin Consent (+5) and User Consent (+3) factors are independent and can both apply to the same app if it has some permissions consented tenant-wide and others consented individually by users.
+- Disabled apps keep their full inherent score and are not counted differently in scoring — the disabled state is shown only as a modal banner and muted color, not as a scoring factor. See [Disabled app handling](#disabled-app-handling).
 
 ### High-value target apps
 
@@ -232,7 +234,7 @@ The list is defined in the script as `$script:HighValueTargetApps` and can be ex
 
 ### Disabled app handling
 
-Disabled apps (`AccountEnabled = false`) keep their full inherent risk score. A disabled app can be re-enabled with a single admin toggle, so an over-privileged dormant app is still a real risk. An informational "App is disabled" factor (0 points) is recorded, and the **Enabled** column / filter indicates current exploitability.
+Disabled apps (`AccountEnabled = false`) keep their full inherent risk score. A disabled app can be re-enabled with a single admin toggle, so an over-privileged dormant app is still a real risk. No factor is added to the list for this; instead, the Risk Analysis modal shows a status banner explaining the app is currently disabled and that the score reflects inherent risk if re-enabled, and mutes the risk badge/gauge color to grey. The main table row, its Risk Level badge, and the **Enabled** column / filter are unaffected and still indicate current exploitability.
 
 ## Custom risk configuration
 
