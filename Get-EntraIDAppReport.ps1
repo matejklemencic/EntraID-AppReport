@@ -153,10 +153,11 @@ $riskConfig = @{
         'RoleAssignmentSchedule.ReadWrite.Directory', 'UserAuthenticationMethod.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All',
         'Domain.ReadWrite.All', 'RoleManagementPolicy.ReadWrite.AzureADGroup', 'RoleManagementPolicy.ReadWrite.Directory',
         'GroupMember.ReadWrite.All', 'DeviceManagementRBAC.ReadWrite.All', 'EntitlementManagement.ReadWrite.All',
-        'Organization.ReadWrite.All', 'Policy.ReadWrite.AuthenticationMethod', 'Policy.ReadWrite.PermissionGrant'
+        'Organization.ReadWrite.All', 'Policy.ReadWrite.AuthenticationMethod', 'Policy.ReadWrite.PermissionGrant',
+        'Directory.Read.All'
     )
     MediumRiskPermissions = @(
-        'Directory.Read.All', 'User.Read.All', 'Group.Read.All',
+        'User.Read.All', 'Group.Read.All',
         'Application.Read.All', 'Sites.Read.All', 'Files.Read.All',
         'Mail.Read', 'Mail.Send', 'User.ReadBasic.All'
     )

@@ -192,8 +192,8 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 |--------|--------|
 | High-value app open to all users (assignment not required) — Azure CLI, Azure/Azure AD PowerShell, Exchange PowerShell, Graph CLI/PowerShell | +50 |
 | Each unique high-risk directory role (e.g. Global Administrator, Security Administrator) | +15 |
-| Each unique high-risk permission (e.g. `Directory.ReadWrite.All`, `User.ReadWrite.All`) | +15 |
-| Each unique medium-risk permission (e.g. `Directory.Read.All`, `Mail.Send`) | +5 |
+| Each unique high-risk permission (e.g. `Directory.ReadWrite.All`, `Directory.Read.All`, `User.ReadWrite.All`) | +15 |
+| Each unique medium-risk permission (e.g. `User.Read.All`, `Mail.Send`) | +5 |
 | Each other directory role | +5 |
 | Has any application permissions (bonus, counted once) | +5 |
 | Sensitive permission granted via Admin Consent, tenant-wide (all users exposed) | +5 |
@@ -250,11 +250,12 @@ The file must be valid JSON with all four required keys:
 {
     "HighRiskPermissions": [
         "Directory.ReadWrite.All",
+        "Directory.Read.All",
         "User.ReadWrite.All"
     ],
     "MediumRiskPermissions": [
-        "Directory.Read.All",
-        "User.Read.All"
+        "User.Read.All",
+        "Mail.Read"
     ],
     "HighRiskDirectoryRoles": [
         "Global Administrator",
