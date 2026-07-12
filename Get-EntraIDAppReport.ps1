@@ -2536,14 +2536,14 @@ $html += @"
 
             const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
 
-            const lines = [headers.map(esc).join(',')];
+            const lines = [headers.map(esc).join(';')];
             visibleRows.forEach(tr => {
                 const cells = Array.from(tr.cells).map(td => {
                     const clone = td.cloneNode(true);
                     clone.querySelectorAll('.csv-exclude').forEach(n => n.remove());
                     return esc(clone.textContent.trim().replace(/\s+/g, ' '));
                 });
-                lines.push(cells.join(','));
+                lines.push(cells.join(';'));
             });
 
             // UTF-8 BOM ensures Excel opens the file with correct encoding
