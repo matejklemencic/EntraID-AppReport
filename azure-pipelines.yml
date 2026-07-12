@@ -51,7 +51,7 @@ steps:
         $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -AsSecureString).Token
 
         # Run the report
-        $outputPath = "$(Build.ArtifactStagingDirectory)/EntraIDReport_$(Get-Date -Format 'yyyy-MM-dd').html"
+        $outputPath = "$(Build.ArtifactStagingDirectory)/EntraIDAppReport_$(Get-Date -Format 'yyyy-MM-dd').html"
 
         & "$(Build.SourcesDirectory)/Get-EntraIDAppReport.ps1" `
           -AccessToken $graphToken `
