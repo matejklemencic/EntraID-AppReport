@@ -424,11 +424,20 @@ function Get-RiskScore {
     $uniqueHighRiskPerms = @()
     $uniqueMediumRiskPerms = @()
     $hasApplicationPerms = $false
+    $hasUngovernedConsent = $false
     
     foreach ($perm in $Permissions) {
         # Track application permissions separately
         if ($perm.Type -eq "Application") {
             $hasApplicationPerms = $true
+        }
+
+        # Track ungoverned (self-service) consent — a High/Medium risk delegated permission
+        # granted via individual User Consent rather than reviewed/approved by an admin.
+        # Flat flag only (not a count) — severity does not scale with how many users consented.
+        if ($perm.Type -eq "Delegated" -and $perm.ConsentType -eq "User Consent" -and
+            ($perm.Permission -in $riskConfig.HighRiskPermissions -or $perm.Permission -in $riskConfig.MediumRiskPermissions)) {
+            $hasUngovernedConsent = $true
         }
         
         # Only count each unique permission once
@@ -478,14 +487,19 @@ function Get-RiskScore {
         $riskFactors += [PSCustomObject]@{ Text = "Suspicious name contains: $($suspiciousKeywords -join ', ')"; Points = 2 }
     }
     
-    # High user count with sensitive permissions (only check once)
+    # Tenant-wide Admin Consent grant covering a sensitive permission (only check once).
+    # This reflects a grant reviewed and approved by an administrator, exposed to every user.
     if ($TotalUsers -eq "All Users" -and ($uniqueHighRiskPerms.Count -gt 0 -or $uniqueMediumRiskPerms.Count -gt 0)) {
         $score += 5
-        $riskFactors += [PSCustomObject]@{ Text = "Sensitive permissions with all users access"; Points = 5 }
+        $riskFactors += [PSCustomObject]@{ Text = "Sensitive permission granted via Admin Consent, tenant-wide (all users exposed)"; Points = 5 }
     }
-    elseif ($TotalUsers -is [int] -and $TotalUsers -gt 50 -and ($uniqueHighRiskPerms.Count -gt 0 -or $uniqueMediumRiskPerms.Count -gt 0)) {
+
+    # Ungoverned consent: at least one sensitive delegated permission was granted via individual
+    # User Consent (no admin review). Flat +2, deliberately independent of consent count — one
+    # ungoverned user grant is already a full exposure regardless of how many others exist.
+    if ($hasUngovernedConsent) {
         $score += 3
-        $riskFactors += [PSCustomObject]@{ Text = "Sensitive permissions affecting many users ($TotalUsers users)"; Points = 3 }
+        $riskFactors += [PSCustomObject]@{ Text = "Sensitive permission granted via User Consent, no admin review (governance blind spot)"; Points = 3 }
     }
         
     # Enhanced ownership checks
@@ -516,17 +530,17 @@ function Get-RiskScore {
     if (-not $AssignmentRequired) {
         if ($IsHighValueTargetApp) {
             $score += 50
-            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required for high-value app"; Points = 50; Detail = "Rarely needed by users and a frequent abuse target. Lock it down with Assignment Required option" }
+            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required for high-value app"; Points = 50; Detail = "Rarely needed by users and a frequent abuse target. Lock it down with Assignment Required option"; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" }
         } else {
             $score += 5
-            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required"; Points = 5 }
+            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" }
         }
     }
 
     # Credential type: secrets are less secure than certificates
     if ($UsesPasswordSecrets) {
         $score += 5
-        $riskFactors += [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5 }
+        $riskFactors += [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5; Detail = "Microsoft recommends that you use a certificate instead of a client secret before moving the application to a production environment." }
     }
 
     # Multiple secrets increase attack surface
@@ -550,16 +564,14 @@ function Get-RiskScore {
         # An external app without a Microsoft-verified publisher has an unverified developer identity
         if (-not $IsVerifiedPublisher) {
             $score += 5
-            $riskFactors += [PSCustomObject]@{ Text = "External application has no verified publisher"; Points = 5 }
+            $riskFactors += [PSCustomObject]@{ Text = "External application has no verified publisher"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/publisher-verification-overview" }
         }
     }
 
     # Disabled apps keep their full inherent risk score — a disabled app can be
     # re-enabled with a single admin toggle, so an over-privileged dormant app is
-    # still a real risk. The Enabled column / filter indicates current exploitability.
-    if (-not $IsEnabled) {
-        $riskFactors += [PSCustomObject]@{ Text = "App is disabled (inherent risk shown; not currently exploitable until re-enabled)"; Points = 0 }
-    }
+    # still a real risk. The Enabled column / filter (and the risk modal's disabled-state
+    # banner) communicate current exploitability; no factor list entry is added here.
 
     # Score thresholds:
     #   Low < 15 ≤ Medium < 35 ≤ High < 50 ≤ Critical
@@ -1143,6 +1155,7 @@ try {
 $internalApps   = @($report | Where-Object { $_.AppOwnerOrganizationId -eq $tenantId }).Count
 $microsoftApps  = @($report | Where-Object { $_.AppOwnerOrganizationId -in $script:MicrosoftTenantIds }).Count
 $externalApps   = @($report | Where-Object { $_.AppOwnerOrganizationId -ne $tenantId -and $_.AppOwnerOrganizationId -notin $script:MicrosoftTenantIds }).Count
+$appsWithUnverifiedPublisher = @($report | Where-Object { $_.AppOwnerOrganizationId -ne $tenantId -and $_.AppOwnerOrganizationId -notin $script:MicrosoftTenantIds -and $_.IsVerifiedPublisher -eq $false }).Count
 $appsWithoutOwners = @($report | Where-Object { $_.HasOwners -eq $false }).Count
 $appsWithOpenAccess = @($report | Where-Object { $_.AssignmentRequired -eq $false }).Count
 $appsWithOwnershipGaps = @($report | Where-Object { $_.OwnershipGap -eq $true }).Count
@@ -1326,6 +1339,7 @@ $html = @"
         .summary-card[data-fv="third-party"] .number { color: #c50f1f; }
         .summary-card[data-fv="gap"]      .number { color: #b06000; }
         .summary-card[data-fv="expiring"] .number { color: #d83b01; }
+        .summary-card[data-fv="unverified"] .number { color: #c50f1f; }
         .summary-card[data-fv="not-required"] .number { color: #767676; }
         .summary-card[data-fv="no"][data-fg="enabled"] .number { color: #767676; }
         /* Border colors matching number colors */
@@ -1338,6 +1352,7 @@ $html = @"
         .summary-card[data-fv="third-party"]         { border-top-color: #c50f1f; }
         .summary-card[data-fv="gap"]                 { border-top-color: #b06000; }
         .summary-card[data-fv="expiring"]            { border-top-color: #d83b01; }
+        .summary-card[data-fv="unverified"]          { border-top-color: #c50f1f; }
         .summary-card[data-fv="not-required"]        { border-top-color: #767676; }
         .summary-card[data-fv="no"][data-fg="enabled"] { border-top-color: #767676; }
         [data-theme="dark"] .summary-card[data-fv="Critical"] .number { color: #e3223a; }
@@ -1347,6 +1362,7 @@ $html = @"
         [data-theme="dark"] .summary-card[data-fv="internal"] .number { color: #2a9d2a; }
         [data-theme="dark"] .summary-card[data-fv="third-party"] .number { color: #e3223a; }
         [data-theme="dark"] .summary-card[data-fv="expiring"] .number { color: #f0571f; }
+        [data-theme="dark"] .summary-card[data-fv="unverified"] .number { color: #e3223a; }
         [data-theme="dark"] .summary-card[data-fv="Critical"]  { border-top-color: #e3223a; }
         [data-theme="dark"] .summary-card[data-fv="High"]      { border-top-color: #f0571f; }
         [data-theme="dark"] .summary-card[data-fv="Medium"]    { border-top-color: #c87000; }
@@ -1354,6 +1370,7 @@ $html = @"
         [data-theme="dark"] .summary-card[data-fv="internal"]  { border-top-color: #2a9d2a; }
         [data-theme="dark"] .summary-card[data-fv="third-party"] { border-top-color: #e3223a; }
         [data-theme="dark"] .summary-card[data-fv="expiring"] { border-top-color: #f0571f; }
+        [data-theme="dark"] .summary-card[data-fv="unverified"] { border-top-color: #e3223a; }
         .summary-card .subtitle { color: var(--text-muted); font-size: 12.5px; }
 
         /* -- Controls -- */
@@ -1578,6 +1595,15 @@ $html = @"
         .risk-scale-labels { position: relative; height: 14px; margin-top: 4px; }
         .risk-scale-tick { position: absolute; top: 0; font-size: 10px; color: var(--text-muted); white-space: nowrap; }
 
+        /* Disabled-app modal state: neutral/grey gauge instead of the normal risk-color gradient */
+        .risk-scale-wrap.disabled .risk-scale-seg { background: var(--text-muted) !important; opacity: 0.5; }
+        .risk-scale-wrap.disabled .risk-scale-marker-value { color: var(--text-muted); }
+        .risk-scale-wrap.disabled .risk-scale-arrow { border-top-color: var(--text-muted); }
+        .risk-disabled-banner {
+            background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px;
+            padding: 8px 12px; margin: 0 0 14px 0; font-size: 12.5px; color: var(--text-muted);
+        }
+
         .perm-badges { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 
         .has-app-reg, .sp-only { color: var(--gray); }
@@ -1699,6 +1725,11 @@ $html = @"
             <div class="number">$externalApps</div>
             <div class="subtitle">Third-party external applications</div>
         </div>
+        <div class="summary-card" data-fg="publisher" data-fv="unverified" title="Third-party apps with no Microsoft-verified publisher identity. Click to filter.">
+            <h3>Unverified Publisher</h3>
+            <div class="number">$appsWithUnverifiedPublisher</div>
+            <div class="subtitle">Developer identity not verified by Microsoft</div>
+        </div>
         <div class="summary-card" data-fg="credentials" data-fv="expiring" title="Certificates or secrets expiring within 30 days. Click to filter.">
             <h3>Expiring Credentials</h3>
             <div class="number">$appsWithExpiringCredentials</div>
@@ -1708,11 +1739,6 @@ $html = @"
             <h3>Ownership Gaps</h3>
             <div class="number">$appsWithOwnershipGaps</div>
             <div class="subtitle">Apps with ownership inconsistencies</div>
-        </div>
-        <div class="summary-card" data-fg="assignment" data-fv="not-required" title="Any user can access without explicit assignment. Click to filter.">
-            <h3>Open Access</h3>
-            <div class="number">$appsWithOpenAccess</div>
-            <div class="subtitle">Apps with no assignment required</div>
         </div>
         <div class="summary-card" data-fg="enabled" data-fv="no" title="Sign-in blocked. Click to filter.">
             <h3>Disabled Apps</h3>
@@ -1733,6 +1759,11 @@ $html = @"
         <input type="text" id="searchInput" class="filter-search" placeholder="Search by application name, App ID, owner or permission..." oninput="queueApplyFilters()">
 
         <div class="filter-group">
+            <span class="filter-group-label">Enabled</span>
+            <span class="filter-tag c-green" data-group="enabled" data-value="yes" onclick="toggleTag(this)">Enabled <span class="cnt"></span></span>
+            <span class="filter-tag c-gray"  data-group="enabled" data-value="no"  onclick="toggleTag(this)">Disabled <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
             <span class="filter-group-label">Ownership</span>
             <span class="filter-tag c-green" data-group="ownership" data-value="internal"    onclick="toggleTag(this)">Internal <span class="cnt"></span></span>
             <span class="filter-tag c-blue"  data-group="ownership" data-value="microsoft"   onclick="toggleTag(this)">Microsoft <span class="cnt"></span></span>
@@ -1742,18 +1773,6 @@ $html = @"
             <span class="filter-group-label">Publisher</span>
             <span class="filter-tag c-green" data-group="publisher" data-value="verified"   onclick="toggleTag(this)">Verified <span class="cnt"></span></span>
             <span class="filter-tag c-gray"  data-group="publisher" data-value="unverified" onclick="toggleTag(this)">Unverified <span class="cnt"></span></span>
-        </div>
-        <div class="filter-group">
-            <span class="filter-group-label">Enabled</span>
-            <span class="filter-tag c-green" data-group="enabled" data-value="yes" onclick="toggleTag(this)">Enabled <span class="cnt"></span></span>
-            <span class="filter-tag c-gray"  data-group="enabled" data-value="no"  onclick="toggleTag(this)">Disabled <span class="cnt"></span></span>
-        </div>
-        <div class="filter-group">
-            <span class="filter-group-label">Risk Level</span>
-            <span class="filter-tag c-red"    data-group="risk" data-value="Critical" onclick="toggleTag(this)">Critical <span class="cnt"></span></span>
-            <span class="filter-tag c-orange" data-group="risk" data-value="High"     onclick="toggleTag(this)">High <span class="cnt"></span></span>
-            <span class="filter-tag c-amber"  data-group="risk" data-value="Medium"   onclick="toggleTag(this)">Medium <span class="cnt"></span></span>
-            <span class="filter-tag c-green"  data-group="risk" data-value="Low"      onclick="toggleTag(this)">Low <span class="cnt"></span></span>
         </div>
         <div class="filter-group">
             <span class="filter-group-label">App Registration</span>
@@ -1772,11 +1791,23 @@ $html = @"
             <span class="filter-tag c-amber" data-group="owners" data-value="gap"     onclick="toggleTag(this)">Ownership Gap <span class="cnt"></span></span>
         </div>
         <div class="filter-group">
+            <span class="filter-group-label">Risk Level</span>
+            <span class="filter-tag c-red"    data-group="risk" data-value="Critical" onclick="toggleTag(this)">Critical <span class="cnt"></span></span>
+            <span class="filter-tag c-orange" data-group="risk" data-value="High"     onclick="toggleTag(this)">High <span class="cnt"></span></span>
+            <span class="filter-tag c-amber"  data-group="risk" data-value="Medium"   onclick="toggleTag(this)">Medium <span class="cnt"></span></span>
+            <span class="filter-tag c-green"  data-group="risk" data-value="Low"      onclick="toggleTag(this)">Low <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
             <span class="filter-group-label">Permissions</span>
             <span class="filter-tag c-red"    data-group="permissions" data-value="application" onclick="toggleTag(this)">Application <span class="cnt"></span></span>
             <span class="filter-tag c-blue"   data-group="permissions" data-value="delegated"   onclick="toggleTag(this)">Delegated <span class="cnt"></span></span>
             <span class="filter-tag c-purple" data-group="permissions" data-value="roles"       onclick="toggleTag(this)">Roles <span class="cnt"></span></span>
             <span class="filter-tag c-gray"   data-group="permissions" data-value="none"        onclick="toggleTag(this)">None <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
+            <span class="filter-group-label">Consent</span>
+            <span class="filter-tag c-orange" data-group="consent" data-value="admin" onclick="toggleTag(this)">Admin Consent <span class="cnt"></span></span>
+            <span class="filter-tag c-blue"   data-group="consent" data-value="user"  onclick="toggleTag(this)">User Consent <span class="cnt"></span></span>
         </div>
         <div class="filter-group">
             <span class="filter-group-label">Credentials</span>
@@ -1913,12 +1944,39 @@ foreach ($app in $sortedReport) {
     $appPermItems       = ""
     $delegatedPermItems = ""
     $rolePermItems      = ""
+
+    # Consent-type presence flags for this app, used both for the row-level Consent filter
+    # and to decide which consent badge to render per permission group below.
+    $hasAdminConsentDelegated = [bool]($app.Permissions | Where-Object { $_.Type -eq "Delegated" -and $_.ConsentType -eq "Admin Consent" })
+    $hasUserConsentDelegated  = [bool]($app.Permissions | Where-Object { $_.Type -eq "Delegated" -and $_.ConsentType -eq "User Consent" })
+
+    # Delegated permissions are aggregated by Permission+Resource before rendering. The same
+    # scope can appear multiple times in $app.Permissions (once per individual user consent
+    # grant), so grouping avoids duplicate rows and lets us combine the per-user consent count,
+    # mirroring the Entra portal's Permissions > User consent view ("granted by", "N total user(s)").
+    $delegatedGroups = [ordered]@{}
+
     foreach ($perm in $app.Permissions) {
-        $permClass = switch ($perm.Type) {
-            "Application"    { "app-permission" }
-            "Delegated"      { "delegated-permission" }
-            "Directory Role" { "directory-role" }
+        if ($perm.Type -eq "Delegated") {
+            $groupKey = "$($perm.Permission)|$($perm.Resource)"
+            if (-not $delegatedGroups.Contains($groupKey)) {
+                $delegatedGroups[$groupKey] = [PSCustomObject]@{
+                    Permission       = $perm.Permission
+                    Resource         = $perm.Resource
+                    HasAdminConsent  = $false
+                    UserConsentCount = 0
+                }
+            }
+            if ($perm.ConsentType -eq "Admin Consent") {
+                $delegatedGroups[$groupKey].HasAdminConsent = $true
+            } else {
+                $userCountValue = if ($perm.UserCount -is [int]) { $perm.UserCount } else { 0 }
+                $delegatedGroups[$groupKey].UserConsentCount += $userCountValue
+            }
+            continue
         }
+
+        $permClass = if ($perm.Type -eq "Application") { "app-permission" } else { "directory-role" }
         $safePermName = ConvertTo-HtmlSafe $perm.Permission
         $safeResource = ConvertTo-HtmlSafe $perm.Resource
         if ($perm.Type -ne "Directory Role") {
@@ -1929,12 +1987,24 @@ foreach ($app in $sortedReport) {
             $permLink = "<a href='$roleLearnUrl' target='_blank' title='View $safePermName on Microsoft Learn' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
         }
         $item = "<div class='permission-item $permClass'><strong>[$($perm.Type)]</strong> $permLink on <em>$safeResource</em></div>"
-        switch ($perm.Type) {
-            "Application"    { $appPermItems       += $item }
-            "Delegated"      { $delegatedPermItems += $item }
-            "Directory Role" { $rolePermItems      += $item }
-        }
+        if ($perm.Type -eq "Application") { $appPermItems += $item } else { $rolePermItems += $item }
     }
+
+    foreach ($groupKey in $delegatedGroups.Keys) {
+        $group = $delegatedGroups[$groupKey]
+        $safePermName = ConvertTo-HtmlSafe $group.Permission
+        $safeResource = ConvertTo-HtmlSafe $group.Resource
+        $urlPermName = [Uri]::EscapeDataString($group.Permission)
+        $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPermName' target='_blank' title='View $safePermName on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
+        if ($group.HasAdminConsent) {
+            $consentBadge = "<span class='badge orange' onclick=`"addFilter('consent','admin'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-left:6px' title='Tenant-wide grant, reviewed and approved by an administrator. Click to filter.'>Admin Consent</span>"
+        } else {
+            $userLabel = if ($group.UserConsentCount -eq 1) { "1 user" } else { "$($group.UserConsentCount) users" }
+            $consentBadge = "<span class='badge blue' onclick=`"addFilter('consent','user'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-left:6px' title='Granted by individual user consent, not reviewed by an administrator. Click to filter.'>$userLabel consented</span>"
+        }
+        $delegatedPermItems += "<div class='permission-item delegated-permission'><strong>[Delegated]</strong> $permLink on <em>$safeResource</em>$consentBadge</div>"
+    }
+
     if (-not $appPermItems)       { $appPermItems       = "No application permissions assigned" }
     if (-not $delegatedPermItems) { $delegatedPermItems = "No delegated permissions assigned" }
     if (-not $rolePermItems)      { $rolePermItems      = "No directory roles assigned" }
@@ -1942,7 +2012,9 @@ foreach ($app in $sortedReport) {
     # Build risk factors — escape each item as it may contain API-sourced permission/app names
     # Points are shown on the left (red, fixed-width) and factors are sorted highest-to-lowest,
     # with 0-point informational items last. An optional Detail renders as a hover tooltip.
-    # Risk level badge colour
+    # Risk level badge colour. This is a presentation-only override for disabled apps — the
+    # underlying RiskLevel text and RiskScore value are untouched; only the modal's color coding
+    # is muted, since the app cannot currently be signed into. The main table badge is unaffected.
     $riskBadgeColor = switch ($app.RiskLevel) {
         "Critical" { "red" }
         "High"     { "orange" }
@@ -1950,14 +2022,23 @@ foreach ($app in $sortedReport) {
         "Low"      { "green" }
         default    { "gray" }
     }
+    $riskModalBadgeColor = if ($app.IsEnabled) { $riskBadgeColor } else { "gray" }
+
+    # Disabled-state banner — shown near the top of the modal, below the score header and above
+    # the factor breakdown. Presentation only: does not affect the score or the factor list.
+    $riskDisabledBannerHtml = if (-not $app.IsEnabled) {
+        "<div class='risk-disabled-banner'>This app is currently disabled and cannot be signed into. The score shown reflects inherent risk if the app is re-enabled.</div>"
+    } else { "" }
 
     # Score header: label + big number on the left, risk-level badge set apart on the right
-    $riskScoreHeaderHtml = "<div class='risk-score-header'><div><div class='risk-score-label'>Total Risk Score</div><div class='risk-score-value'>$($app.RiskScore)</div></div><span class='badge $riskBadgeColor'>$($app.RiskLevel)</span></div>"
+    $riskScoreHeaderHtml = "<div class='risk-score-header'><div><div class='risk-score-label'>Total Risk Score</div><div class='risk-score-value'>$($app.RiskScore)</div></div><span class='badge $riskModalBadgeColor'>$($app.RiskLevel)</span></div>"
 
     # Threshold scale bar — segment widths are proportional to the real threshold ranges
     # (Low 0-14, Medium 15-34, High 35-49, Critical 50+). The visual scale caps at 65 so the
     # open-ended Critical band still renders as a normal-sized segment; scores above the cap
-    # simply pin the marker at the right edge.
+    # simply pin the marker at the right edge. For disabled apps the gauge is rendered in a
+    # neutral/grey tone (via the 'disabled' class) instead of the normal color gradient.
+    $riskScaleWrapClass = if ($app.IsEnabled) { "risk-scale-wrap" } else { "risk-scale-wrap disabled" }
     $riskScaleMax    = 65
     $riskScoreClamped = [Math]::Min($app.RiskScore, $riskScaleMax)
     $riskMarkerPct    = [Math]::Round(($riskScoreClamped / $riskScaleMax) * 100, 1)
@@ -1970,7 +2051,7 @@ foreach ($app in $sortedReport) {
     $riskTick15Pct = $riskLowPct
     $riskTick35Pct = $riskLowPct + $riskMediumPct
     $riskTick50Pct = $riskLowPct + $riskMediumPct + $riskHighPct
-    $riskLevelLegendHtml = "<div class='risk-scale-wrap'>" +
+    $riskLevelLegendHtml = "<div class='$riskScaleWrapClass'>" +
             "<div class='risk-scale-marker' style='left:$riskMarkerPct%'><span class='risk-scale-marker-value'>$($app.RiskScore) pts</span><span class='risk-scale-arrow'></span></div>" +
             "<div class='risk-scale-bar'>" +
                 "<div class='risk-scale-seg low' style='width:$riskLowPct%' title='Low: 0-14 pts'></div>" +
@@ -2010,7 +2091,14 @@ foreach ($app in $sortedReport) {
                 $roleLink = "<a href='$roleLearnUrl' target='_blank' title='View $safeRole on Microsoft Learn' style='color:inherit;text-decoration:underline dotted;'>$safeRole</a>"
                 $factorText = $factorText.Replace($safeRole, $roleLink)
             }
-            $detailMarker = if ($_.Detail) { " <span title='$(ConvertTo-HtmlSafe $_.Detail)' style='cursor:help;color:var(--blue)'>&#9432;</span>" } else { "" }
+            # Linkify the whole factor text to a reference URL, when provided (e.g. Microsoft Learn docs)
+            if ($_.Url) {
+                $factorText = "<a href='$($_.Url)' target='_blank' title='Learn more on Microsoft Learn' style='color:inherit;text-decoration:underline dotted;'>$factorText</a>"
+            }
+            $detailMarker = if ($_.Detail) {
+                $safeDetail = ConvertTo-HtmlSafe $_.Detail
+                " <span title='$safeDetail' aria-label='$safeDetail' style='cursor:help;color:var(--blue);display:inline-flex;vertical-align:middle'><svg width='12' height='12' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg' focusable='false' style='display:block'><circle cx='8' cy='8' r='7' stroke='currentColor' stroke-width='1.4'/><rect x='7.25' y='6.5' width='1.5' height='5.5' rx='0.75' fill='currentColor'/><rect x='7.25' y='3.75' width='1.5' height='1.5' rx='0.75' fill='currentColor'/></svg></span>"
+            } else { "" }
             $pointsCell = if ($_.Points -gt 0) {
                 "<span style='color:var(--bad);font-weight:600'>+$($_.Points)</span>"
             } else {
@@ -2018,9 +2106,9 @@ foreach ($app in $sortedReport) {
             }
             "<li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'>$pointsCell</span><span>$factorText$detailMarker</span></li>"
         }) -join ""
-        "$riskScoreHeaderHtml<ul style='margin:5px 0; padding-left: 4px; list-style:none'>$riskFactorItems</ul>$riskLevelLegendHtml"
+        "$riskScoreHeaderHtml$riskDisabledBannerHtml<ul style='margin:5px 0; padding-left: 4px; list-style:none'>$riskFactorItems</ul>$riskLevelLegendHtml"
     } else {
-        "$riskScoreHeaderHtml<div>No specific risk factors identified</div>$riskLevelLegendHtml"
+        "$riskScoreHeaderHtml$riskDisabledBannerHtml<div>No specific risk factors identified</div>$riskLevelLegendHtml"
     }
     
     $safeDisplayName = ConvertTo-HtmlSafe $app.DisplayName
@@ -2064,7 +2152,7 @@ foreach ($app in $sortedReport) {
     $appPermsModalTitle       = "Application Permissions for $($app.DisplayName) ($($app.ApplicationPermissions))"
     $delegatedPermsModalTitle = "Delegated Permissions for $($app.DisplayName) ($($app.DelegatedPermissions))"
     $rolePermsModalTitle      = "Directory Roles for $($app.DisplayName) ($($app.DirectoryRoles))"
-    $riskModalTitle           = "Risk Analysis for $($app.DisplayName) ($($app.RiskFactors.Count) factors)"
+    $riskModalTitle           = "Risk Analysis for $($app.DisplayName)"
     # Certificate modal
     $certsModalTitle = "Certificates for $($app.DisplayName) ($($app.ActiveCertificates) active)"
     if ($app.ActiveCertificateList -and $app.ActiveCertificateList.Count -gt 0) {
@@ -2193,7 +2281,7 @@ foreach ($app in $sortedReport) {
     }
     $modalDataEntries.Add("`"$safeKey`": { appPermsTitle: $(ConvertTo-Json $appPermsModalTitle -Compress), appPermsHtml: $(ConvertTo-Json $appPermItems -Compress), delegatedPermsTitle: $(ConvertTo-Json $delegatedPermsModalTitle -Compress), delegatedPermsHtml: $(ConvertTo-Json $delegatedPermItems -Compress), rolePermsTitle: $(ConvertTo-Json $rolePermsModalTitle -Compress), rolePermsHtml: $(ConvertTo-Json $rolePermItems -Compress), riskTitle: $(ConvertTo-Json $riskModalTitle -Compress), riskHtml: $(ConvertTo-Json $riskFactorsHtml -Compress), certsTitle: $(ConvertTo-Json $certsModalTitle -Compress), certsHtml: $(ConvertTo-Json $certsModalHtml -Compress), secretsTitle: $(ConvertTo-Json $secretsModalTitle -Compress), secretsHtml: $(ConvertTo-Json $secretsModalHtml -Compress), expiringTitle: $(ConvertTo-Json $expiringModalTitle -Compress), expiringHtml: $(ConvertTo-Json $expiringModalHtml -Compress), expiredTitle: $(ConvertTo-Json $expiredModalTitle -Compress), expiredHtml: $(ConvertTo-Json $expiredModalHtml -Compress), ownershipTitle: $(ConvertTo-Json $ownershipModalTitle -Compress), ownershipHtml: $(ConvertTo-Json $ownershipModalHtml -Compress), ownersTitle: $(ConvertTo-Json $ownersModalTitle -Compress), ownersHtml: $(ConvertTo-Json $ownersModalHtml -Compress), ownershipGapTitle: $(ConvertTo-Json $ownershipGapModalTitle -Compress), ownershipGapHtml: $(ConvertTo-Json $ownershipGapModalHtml -Compress) }")
     $html += @"
-            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-expired="$expiredValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
+            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hasadminconsent="$(if ($hasAdminConsentDelegated) { 'yes' } else { 'no' })" data-hasuserconsent="$(if ($hasUserConsentDelegated) { 'yes' } else { 'no' })" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-expired="$expiredValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
                 <td><a class="app-name" href="$portalUrl" target="_blank" title="Open in Entra portal">$safeDisplayName</a></td>
                 <td class="$enabledClass">$enabledText</td>
                 <td><code class="mono">$($app.AppId)</code></td>
@@ -2225,7 +2313,7 @@ $html += @"
         const activeFilters = {};
         const groupLabels = {
             ownership: 'Ownership', risk: 'Risk', appreg: 'App Reg',
-            assignment: 'Assignment', owners: 'Owners', permissions: 'Permissions', credentials: 'Credentials', enabled: 'Enabled', publisher: 'Publisher'
+            assignment: 'Assignment', owners: 'Owners', permissions: 'Permissions', consent: 'Consent', credentials: 'Credentials', enabled: 'Enabled', publisher: 'Publisher'
         };
         const valueLabels = {
             internal: 'Internal', external: 'External', microsoft: 'Microsoft', 'third-party': 'Third-Party',
@@ -2235,7 +2323,8 @@ $html += @"
             has: 'Has Owners', noowners: 'No Owners', gap: 'Ownership Gap',
             application: 'Application', delegated: 'Delegated', roles: 'Roles', none: 'None',
             certs: 'Has Certs', secrets: 'Has Secrets', expiring: 'Expiring', expired: 'Expired',
-            verified: 'Verified', unverified: 'Unverified'
+            verified: 'Verified', unverified: 'Unverified',
+            admin: 'Admin Consent', user: 'User Consent'
         };
 
         function rowMatchesTag(row, group, value) {
@@ -2269,6 +2358,10 @@ $html += @"
                     if (value === 'roles')       return r > 0;
                     if (value === 'none')        return a === 0 && d === 0 && r === 0;
                 }
+                case 'consent':
+                    if (value === 'admin') return row.dataset.hasadminconsent === 'yes';
+                    if (value === 'user')  return row.dataset.hasuserconsent === 'yes';
+                    return false;
             }
             return false;
         }

@@ -70,8 +70,23 @@ function New-Cred {
     }
 }
 function New-Perm {
-    param([string]$Type, [string]$Permission, [string]$Resource)
-    [PSCustomObject]@{ Type = $Type; Permission = $Permission; Resource = $Resource }
+    param(
+        [string]$Type,
+        [string]$Permission,
+        [string]$Resource,
+        [string]$ConsentType,
+        $UserCount
+    )
+    # Defaults keep older/simpler mock entries working unchanged: Application/Directory Role
+    # permissions are always admin-governed by definition; Delegated permissions default to
+    # tenant-wide Admin Consent unless a scenario explicitly overrides it to show User Consent.
+    if (-not $ConsentType) {
+        $ConsentType = if ($Type -eq "Directory Role") { "Admin Assignment" } else { "Admin Consent" }
+    }
+    if ($null -eq $UserCount) {
+        $UserCount = if ($ConsentType -eq "Admin Consent" -and $Type -eq "Delegated") { "All Users" } else { "N/A" }
+    }
+    [PSCustomObject]@{ Type = $Type; Permission = $Permission; Resource = $Resource; ConsentType = $ConsentType; UserCount = $UserCount }
 }
 
 $report = @(
@@ -120,8 +135,8 @@ $report = @(
         RiskLevel = "Critical"
         RiskFactors = @(
             [PSCustomObject]@{ Text = "High-risk permission: Directory.ReadWrite.All"; Points = 15; Permission = "Directory.ReadWrite.All" },
-            [PSCustomObject]@{ Text = "Assignment not required"; Points = 5 },
-            [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5 },
+            [PSCustomObject]@{ Text = "Assignment not required"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" },
+            [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5; Detail = "Microsoft recommends that you use a certificate instead of a client secret before moving the application to a production environment." },
             [PSCustomObject]@{ Text = "Multiple secrets configured (2) - reduces auditability"; Points = 5 },
             [PSCustomObject]@{ Text = "Ownership gap - owners differ between Service Principal and App Registration"; Points = 1 }
         )
@@ -247,7 +262,7 @@ $report = @(
         RiskLevel = "Medium"
         RiskFactors = @(
             [PSCustomObject]@{ Text = "External application registered in another tenant"; Points = 5 },
-            [PSCustomObject]@{ Text = "External application has no verified publisher"; Points = 5 },
+            [PSCustomObject]@{ Text = "External application has no verified publisher"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/publisher-verification-overview" },
             [PSCustomObject]@{ Text = "No owners assigned (neither Service Principal nor App Registration)"; Points = 4 }
         )
     }
@@ -287,10 +302,10 @@ $report = @(
             (New-Cred "Portal TLS Cert" -100 260 "cert-5551")
         )
         ActiveSecretList = @()
-        RiskScore = 0
+        RiskScore = 2
         RiskLevel = "Low"
         RiskFactors = @(
-            [PSCustomObject]@{ Text = "App is disabled (inherent risk shown; not currently exploitable until re-enabled)"; Points = 0 }
+            [PSCustomObject]@{ Text = "Suspicious name contains: legacy"; Points = 2 }
         )
     }
 
@@ -334,8 +349,166 @@ $report = @(
         RiskFactors = @(
             [PSCustomObject]@{ Text = "Has application permissions"; Points = 5 },
             [PSCustomObject]@{ Text = "No owners assigned (neither Service Principal nor App Registration)"; Points = 4 },
-            [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5 },
+            [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5; Detail = "Microsoft recommends that you use a certificate instead of a client secret before moving the application to a production environment." },
             [PSCustomObject]@{ Text = "Long-lived credentials (expiry > 1 year)"; Points = 5 }
+        )
+    }
+
+    # 7) Internal, self-service consent governance blind spot (User Consent, no admin review)
+    [PSCustomObject]@{
+        DisplayName = "Personal File Sync Tool"
+        AppId = "f6f6f6f6-0000-0000-0000-000000000007"
+        ServicePrincipalId = "sp-0000-0000-0000-000000000007"
+        AppOwnerOrganizationId = $tenantId
+        HasAppRegistration = $false
+        Owners = @()
+        ServicePrincipalOwners = @()
+        AppRegistrationOwners  = @()
+        HasOwners = $false
+        HasServicePrincipalOwners = $false
+        HasAppRegistrationOwners  = $false
+        OwnershipGap = $false
+        AssignmentRequired = $true
+        IsEnabled = $true
+        IsVerifiedPublisher = $false
+        VerifiedPublisherName = ""
+        TotalPermissions = 3
+        ApplicationPermissions = 0
+        DelegatedPermissions = 3
+        DirectoryRoles = 0
+        Permissions = @(
+            # Same permission consented to individually by three separate users — the Permissions
+            # modal aggregates these into a single "3 users consented" row instead of duplicates.
+            (New-Perm "Delegated" "Mail.Read" "Microsoft Graph" -ConsentType "User Consent" -UserCount 1),
+            (New-Perm "Delegated" "Mail.Read" "Microsoft Graph" -ConsentType "User Consent" -UserCount 1),
+            (New-Perm "Delegated" "Mail.Read" "Microsoft Graph" -ConsentType "User Consent" -UserCount 1)
+        )
+        HasActiveCredentials = $false
+        ActiveCertificates = 0
+        ActiveSecrets = 0
+        ExpiringCredentials = 0
+        ExpiredCredentials = 0
+        ActiveCertificateList = @()
+        ActiveSecretList = @()
+        RiskScore = 7
+        RiskLevel = "Low"
+        RiskFactors = @(
+            [PSCustomObject]@{ Text = "Medium-risk permission: Mail.Read"; Points = 5; Permission = "Mail.Read" },
+            [PSCustomObject]@{ Text = "Sensitive permission granted via User Consent, no admin review (governance blind spot)"; Points = 2 }
+        )
+    }
+
+    # 8) Internal, tenant-wide Admin Consent grant of a high-risk permission
+    [PSCustomObject]@{
+        DisplayName = "Company-Wide Calendar Assistant"
+        AppId = "07070707-0000-0000-0000-000000000008"
+        ServicePrincipalId = "sp-0000-0000-0000-000000000008"
+        AppOwnerOrganizationId = $tenantId
+        HasAppRegistration = $true
+        Owners = @(
+            (New-Owner "Erin Ops" "erin@contoso.com" "User" "Both")
+        )
+        ServicePrincipalOwners = @('Erin Ops')
+        AppRegistrationOwners  = @('Erin Ops')
+        HasOwners = $true
+        HasServicePrincipalOwners = $true
+        HasAppRegistrationOwners  = $true
+        OwnershipGap = $false
+        AssignmentRequired = $true
+        IsEnabled = $true
+        IsVerifiedPublisher = $false
+        VerifiedPublisherName = ""
+        TotalPermissions = 1
+        ApplicationPermissions = 0
+        DelegatedPermissions = 1
+        DirectoryRoles = 0
+        Permissions = @(
+            (New-Perm "Delegated" "Calendars.ReadWrite" "Microsoft Graph" -ConsentType "Admin Consent" -UserCount "All Users")
+        )
+        HasActiveCredentials = $false
+        ActiveCertificates = 0
+        ActiveSecrets = 0
+        ExpiringCredentials = 0
+        ExpiredCredentials = 0
+        ActiveCertificateList = @()
+        ActiveSecretList = @()
+        RiskScore = 20
+        RiskLevel = "Medium"
+        RiskFactors = @(
+            [PSCustomObject]@{ Text = "High-risk permission: Calendars.ReadWrite"; Points = 15; Permission = "Calendars.ReadWrite" },
+            [PSCustomObject]@{ Text = "Sensitive permission granted via Admin Consent, tenant-wide (all users exposed)"; Points = 5 }
+        )
+    }
+
+    # 9) Kitchen Sink: every distinct risk factor text/hint in a single app, for review purposes.
+    # NOTE: Some factors are mutually exclusive in the real Get-RiskScore engine (e.g. ownership
+    # variants, or the two "Assignment not required" variants) and could never all fire together
+    # on one real app. This entry hardcodes every distinct factor line so all text/tooltips can be
+    # reviewed side by side in a single Risk Analysis modal.
+    [PSCustomObject]@{
+        DisplayName = "Legacy Test Sync Connector (Kitchen Sink - All Risk Factors)"
+        AppId = "99999999-0000-0000-0000-000000000009"
+        ServicePrincipalId = "sp-0000-0000-0000-000000000009"
+        AppOwnerOrganizationId = $thirdPartyOrgId
+        HasAppRegistration = $true
+        Owners = @(
+            (New-Owner "Frank Ops" "frank@contoso.com" "User" "ServicePrincipal")
+        )
+        ServicePrincipalOwners = @('Frank Ops')
+        AppRegistrationOwners  = @()
+        HasOwners = $true
+        HasServicePrincipalOwners = $true
+        HasAppRegistrationOwners  = $false
+        OwnershipGap = $true
+        AssignmentRequired = $false
+        IsEnabled = $true
+        IsVerifiedPublisher = $false
+        VerifiedPublisherName = ""
+        TotalPermissions = 5
+        ApplicationPermissions = 1
+        DelegatedPermissions = 2
+        DirectoryRoles = 2
+        Permissions = @(
+            (New-Perm "Application" "Application.ReadWrite.All" "Microsoft Graph"),
+            (New-Perm "Delegated"   "Directory.ReadWrite.All"   "Microsoft Graph" -ConsentType "Admin Consent" -UserCount "All Users"),
+            (New-Perm "Delegated"   "Mail.Read"                 "Microsoft Graph" -ConsentType "User Consent" -UserCount 1),
+            (New-Perm "Delegated"   "Mail.Read"                 "Microsoft Graph" -ConsentType "User Consent" -UserCount 1),
+            (New-Perm "Directory Role" "Global Administrator" "Entra ID"),
+            (New-Perm "Directory Role" "Reports Reader"        "Entra ID")
+        )
+        HasActiveCredentials = $true
+        ActiveCertificates = 0
+        ActiveSecrets = 3
+        ExpiringCredentials = 1
+        ExpiredCredentials = 0
+        ActiveCertificateList = @()
+        ActiveSecretList = @(
+            (New-Cred "Sync Secret 1" -400 800 "key-9991"),
+            (New-Cred "Sync Secret 2" -300 20  "key-9992"),
+            (New-Cred "Sync Secret 3" -100 500 "key-9993")
+        )
+        RiskScore = 144
+        RiskLevel = "Critical"
+        RiskFactors = @(
+            [PSCustomObject]@{ Text = "High-risk permission: Directory.ReadWrite.All"; Points = 15; Permission = "Directory.ReadWrite.All" },
+            [PSCustomObject]@{ Text = "Medium-risk permission: Mail.Read"; Points = 5; Permission = "Mail.Read" },
+            [PSCustomObject]@{ Text = "Has application permissions"; Points = 5 },
+            [PSCustomObject]@{ Text = "High-risk directory role: Global Administrator"; Points = 15; Role = "Global Administrator" },
+            [PSCustomObject]@{ Text = "Directory role: Reports Reader"; Points = 5; Role = "Reports Reader" },
+            [PSCustomObject]@{ Text = "Suspicious name contains: test, legacy, sync"; Points = 2 },
+            [PSCustomObject]@{ Text = "Sensitive permission granted via Admin Consent, tenant-wide (all users exposed)"; Points = 5 },
+            [PSCustomObject]@{ Text = "Sensitive permission granted via User Consent, no admin review (governance blind spot)"; Points = 3 },
+            [PSCustomObject]@{ Text = "No owners assigned (neither Service Principal nor App Registration)"; Points = 4 },
+            [PSCustomObject]@{ Text = "No Service Principal owners (only App Registration owners)"; Points = 2 },
+            [PSCustomObject]@{ Text = "No App Registration owners (only Service Principal owners)"; Points = 2 },
+            [PSCustomObject]@{ Text = "Ownership gap - owners differ between Service Principal and App Registration"; Points = 1 },
+            [PSCustomObject]@{ Text = "Assignment not required for high-value app"; Points = 50; Detail = "Rarely needed by users and a frequent abuse target. Lock it down with Assignment Required option"; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" },
+            [PSCustomObject]@{ Text = "Assignment not required"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" },
+            [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5; Detail = "Microsoft recommends that you use a certificate instead of a client secret before moving the application to a production environment." },
+            [PSCustomObject]@{ Text = "Multiple secrets configured (3) - reduces auditability"; Points = 5 },
+            [PSCustomObject]@{ Text = "Long-lived credentials (expiry > 1 year)"; Points = 5 },
+            [PSCustomObject]@{ Text = "External application registered in another tenant"; Points = 5 },
+            [PSCustomObject]@{ Text = "External application has no verified publisher"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/publisher-verification-overview" }
         )
     }
 )
@@ -351,6 +524,7 @@ $lowRiskApps           = @($report | Where-Object { $_.RiskLevel -eq "Low" }).Co
 $internalApps          = @($report | Where-Object { $_.AppOwnerOrganizationId -eq $tenantId }).Count
 $microsoftApps         = @($report | Where-Object { $_.AppOwnerOrganizationId -in $script:MicrosoftTenantIds }).Count
 $externalApps          = @($report | Where-Object { $_.AppOwnerOrganizationId -ne $tenantId -and $_.AppOwnerOrganizationId -notin $script:MicrosoftTenantIds }).Count
+$appsWithUnverifiedPublisher = @($report | Where-Object { $_.AppOwnerOrganizationId -ne $tenantId -and $_.AppOwnerOrganizationId -notin $script:MicrosoftTenantIds -and $_.IsVerifiedPublisher -eq $false }).Count
 $appsWithOwnershipGaps = @($report | Where-Object { $_.OwnershipGap -eq $true }).Count
 $appsWithExpiringCredentials = @($report | Where-Object { $_.ExpiringCredentials -gt 0 }).Count
 $appsWithOpenAccess    = @($report | Where-Object { $_.AssignmentRequired -eq $false }).Count
