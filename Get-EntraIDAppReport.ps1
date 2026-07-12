@@ -1997,12 +1997,12 @@ foreach ($app in $sortedReport) {
         $urlPermName = [Uri]::EscapeDataString($group.Permission)
         $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPermName' target='_blank' title='View $safePermName on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
         if ($group.HasAdminConsent) {
-            $consentBadge = "<span class='badge orange' onclick=`"addFilter('consent','admin'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-left:6px' title='Tenant-wide grant, reviewed and approved by an administrator. Click to filter.'>Admin Consent</span>"
+            $consentBadge = "<span class='badge orange' onclick=`"addFilter('consent','admin'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-right:6px' title='Tenant-wide grant, reviewed and approved by an administrator. Click to filter.'>Admin Consent</span>"
         } else {
             $userLabel = if ($group.UserConsentCount -eq 1) { "1 user" } else { "$($group.UserConsentCount) users" }
-            $consentBadge = "<span class='badge blue' onclick=`"addFilter('consent','user'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-left:6px' title='Granted by individual user consent, not reviewed by an administrator. Click to filter.'>$userLabel consented</span>"
+            $consentBadge = "<span class='badge blue' onclick=`"addFilter('consent','user'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-right:6px' title='Granted by individual user consent, not reviewed by an administrator. Click to filter.'>$userLabel consented</span>"
         }
-        $delegatedPermItems += "<div class='permission-item delegated-permission'><strong>[Delegated]</strong> $permLink on <em>$safeResource</em>$consentBadge</div>"
+        $delegatedPermItems += "<div class='permission-item delegated-permission'>$consentBadge<strong>[Delegated]</strong> $permLink on <em>$safeResource</em></div>"
     }
 
     if (-not $appPermItems)       { $appPermItems       = "No application permissions assigned" }
