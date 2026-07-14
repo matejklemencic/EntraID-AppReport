@@ -10,7 +10,7 @@
 .AUTHOR
     Matej Klemencic (www.matej.guru)
 .NOTES
-    Version:        V26.07.12
+    Version:        V26.07.14
 
     Installation: Install the required Microsoft Graph modules (install each separately to use -MinimumVersion):
     @('Microsoft.Graph.Authentication','Microsoft.Graph.Applications','Microsoft.Graph.Identity.SignIns','Microsoft.Graph.Identity.DirectoryManagement','Microsoft.Graph.Users') | ForEach-Object { Install-Module $_ -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber }
@@ -133,7 +133,7 @@ if (($ClientId -or $CertificateThumbprint) -and -not $TenantId) {
 $ErrorActionPreference = 'Stop'
 
 # Script version — keep in sync with the .NOTES header above; surfaced in the report footer
-$ScriptVersion = 'V26.07.12'
+$ScriptVersion = 'V26.07.14'
 
 # Microsoft first-party tenant IDs — used to classify Microsoft-owned apps
 $script:MicrosoftTenantIds = @(
