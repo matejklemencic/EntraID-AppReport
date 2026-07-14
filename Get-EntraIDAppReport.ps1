@@ -2191,7 +2191,7 @@ foreach ($app in $sortedReport) {
     $rolePermsModalTitle      = "Directory Roles for $($app.DisplayName) ($($app.DirectoryRoles))"
     $riskModalTitle           = "Risk Analysis for $($app.DisplayName)"
     # Certificate modal
-    $certsModalTitle = "Certificates for $($app.DisplayName) ($($app.ActiveCertificates) active)"
+    $certsModalTitle = "Certificates for $($app.DisplayName)"
     if ($app.ActiveCertificateList -and $app.ActiveCertificateList.Count -gt 0) {
         $certRows = ($app.ActiveCertificateList | ForEach-Object {
             $cName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
@@ -2206,7 +2206,7 @@ foreach ($app in $sortedReport) {
         $certsModalHtml = "No active certificates"
     }
     # Secret modal
-    $secretsModalTitle = "Client Secrets for $($app.DisplayName) ($($app.ActiveSecrets) active)"
+    $secretsModalTitle = "Client Secrets for $($app.DisplayName)"
     if ($app.ActiveSecretList -and $app.ActiveSecretList.Count -gt 0) {
         $secretRows = ($app.ActiveSecretList | ForEach-Object {
             $sName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
@@ -2234,7 +2234,7 @@ foreach ($app in $sortedReport) {
     if ($app.ExpiredSecretList)      { $allExpiredCredsForStatus += ($app.ExpiredSecretList      | ForEach-Object { [PSCustomObject]@{ Kind = "Secret";      DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
     $expiredCredList  = @($allExpiredCredsForStatus | Where-Object { $_.EndDateTime -and $_.EndDateTime -le $credStatusNow })
 
-    $expiringModalTitle = "Expiring Credentials for $($app.DisplayName) ($($expiringCredList.Count))"
+    $expiringModalTitle = "Expiring Credentials for $($app.DisplayName)"
     if ($expiringCredList.Count -gt 0) {
         $expiringRows = ($expiringCredList | ForEach-Object {
             $xKind  = ConvertTo-HtmlSafe $_.Kind
@@ -2249,7 +2249,7 @@ foreach ($app in $sortedReport) {
         $expiringModalHtml = "No credentials expiring within 30 days"
     }
 
-    $expiredModalTitle = "Expired Credentials for $($app.DisplayName) ($($expiredCredList.Count))"
+    $expiredModalTitle = "Expired Credentials for $($app.DisplayName)"
     if ($expiredCredList.Count -gt 0) {
         $expiredRows = ($expiredCredList | ForEach-Object {
             $xKind  = ConvertTo-HtmlSafe $_.Kind
@@ -2283,7 +2283,7 @@ foreach ($app in $sortedReport) {
     $ownershipModalTitle = "App Ownership for $($app.DisplayName)"
     $ownershipModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type</td><td style='padding:6px 8px'>$ownershipLabel</td></tr>$publisherRow<tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID</td><td style='padding:6px 8px'><code>$safeOrgId</code></td></tr></tbody></table>"
     # Owners modal — all owners with Enterprise App / App Registration coverage
-    $ownersModalTitle = "Owners for $($app.DisplayName) ($($app.Owners.Count) total)"
+    $ownersModalTitle = "Owners for $($app.DisplayName)"
     if ($app.Owners -and $app.Owners.Count -gt 0) {
         $ownerRows = ($app.Owners | ForEach-Object {
             $oName = ConvertTo-HtmlSafe $_.DisplayName
@@ -2293,9 +2293,9 @@ foreach ($app in $sortedReport) {
             $onApp = if ($_.Source -eq 'AppRegistration'  -or $_.Source -eq 'Both') { "&#10003;" } else { "&#8212;" }
             "<tr><td style='padding:4px 8px'>$oName</td><td style='padding:4px 8px'>$oType</td><td style='padding:4px 8px'><small>$oUpn</small></td><td style='padding:4px 8px;text-align:center'>$onSp</td><td style='padding:4px 8px;text-align:center'>$onApp</td></tr>"
         }) -join ""
-        $ownersModalHtml = "<table id='ownersModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('ownersModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th onclick=`"sortTable('ownersModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('ownersModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th onclick=`"sortTable('ownersModalTable',3,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App</th><th onclick=`"sortTable('ownersModalTable',4,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration</th></tr></thead><tbody>$ownerRows</tbody></table>"
+        $ownersModalHtml = "<div class='risk-info-banner'>Owners can add or rotate this app's credentials and authenticate as the app itself. This can let an owner manage users or other objects using the app's permissions, not just their own.</div><table id='ownersModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('ownersModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th onclick=`"sortTable('ownersModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('ownersModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th onclick=`"sortTable('ownersModalTable',3,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App</th><th onclick=`"sortTable('ownersModalTable',4,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration</th></tr></thead><tbody>$ownerRows</tbody></table>"
     } else {
-        $ownersModalHtml = "No owners assigned"
+        $ownersModalHtml = "<div class='risk-info-banner'>Owners can add or rotate this app's credentials and authenticate as the app itself. This can let an owner manage users or other objects using the app's permissions, not just their own.</div>No owners assigned"
     }
     # Ownership Gap modal — owners not present on both sides
     $ownershipGapModalTitle = "Ownership Gap for  $($app.DisplayName)"
@@ -2312,7 +2312,7 @@ foreach ($app in $sortedReport) {
             }
             "<tr><td style='padding:4px 8px'>$gName</td><td style='padding:4px 8px'>$gType</td><td style='padding:4px 8px'><small>$gUpn</small></td><td style='padding:4px 8px'>$gWhere</td></tr>"
         }) -join ""
-        $ownershipGapModalHtml = "<p style='margin:0 0 10px 0;font-size:13px'>Owners not assigned to both the Enterprise App and the App Registration:</p><table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Assigned To</th></tr></thead><tbody>$gapRows</tbody></table>"
+        $ownershipGapModalHtml = "<div class='risk-info-banner'>These owners are set up on only one side, Enterprise App or App Registration, not both. Not necessarily a risk, but worth reviewing why.</div><table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Assigned To</th></tr></thead><tbody>$gapRows</tbody></table>"
     } else {
         $ownershipGapModalHtml = "No ownership gap detected. All owners are assigned to both the Enterprise App and App Registration."
     }
