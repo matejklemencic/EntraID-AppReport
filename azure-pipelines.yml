@@ -26,26 +26,53 @@ schedules:
 pool:
   vmImage: ubuntu-24.04
 
+variables:
+  psModuleCache: $(Pipeline.Workspace)/.psmodules
+
 steps:
+  - checkout: self
+    fetchDepth: 1
+
+  # Restore the Graph modules saved by a previous run; the post-job step of this task
+  # saves the folder again if the install step below changed it (first run only).
+  - task: Cache@2
+    displayName: "Cache Microsoft Graph modules"
+    inputs:
+      key: 'psmodules | "$(Agent.OS)" | graph-v2'
+      path: $(psModuleCache)
+
+  # Save-PSResource (PSResourceGet, ships with PowerShell 7.4+) is much faster than
+  # Install-Module. Each module is skipped when the cache restore already provided it,
+  # so on a warm cache this step is a no-op.
+  - pwsh: |
+      New-Item -ItemType Directory -Force -Path "$(psModuleCache)" | Out-Null
+      @(
+          'Microsoft.Graph.Authentication',
+          'Microsoft.Graph.Applications',
+          'Microsoft.Graph.Identity.SignIns',
+          'Microsoft.Graph.Identity.DirectoryManagement',
+          'Microsoft.Graph.Users'
+      ) | ForEach-Object {
+          if (Test-Path (Join-Path "$(psModuleCache)" $_)) {
+              Write-Host "$_ already cached"
+          } else {
+              Write-Host "Saving $_ ..."
+              Save-PSResource -Name $_ -Version '[2.0.0,)' -Path "$(psModuleCache)" -TrustRepository
+          }
+      }
+    displayName: "Install Microsoft Graph modules (cache miss only)"
+
   - task: AzurePowerShell@5
     displayName: "Generate Entra ID App Report"
+    retryCountOnTaskFailure: 1
     inputs:
       azureSubscription: "<YOUR_AZURE_SERVICE_CONNECTION_NAME>"   # <-- update this
       pwsh: true
       azurePowerShellVersion: LatestVersion
       ScriptType: InlineScript
       Inline: |
-        # Install required Microsoft Graph modules
-        Write-Host "##[section]Installing Microsoft Graph modules..."
-        @(
-            'Microsoft.Graph.Authentication',
-            'Microsoft.Graph.Applications',
-            'Microsoft.Graph.Identity.DirectoryManagement',
-            'Microsoft.Graph.Identity.SignIns',
-            'Microsoft.Graph.Users'
-        ) | ForEach-Object {
-            Install-Module -Name $_ -MinimumVersion '2.0.0' -Force -AllowClobber -Scope CurrentUser
-        }
+        # Make the cached Graph modules discoverable
+        $env:PSModulePath = "$(psModuleCache)" + [IO.Path]::PathSeparator + $env:PSModulePath
 
         # Get Graph access token from the Az service connection context
         $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -AsSecureString).Token

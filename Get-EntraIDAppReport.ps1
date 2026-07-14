@@ -142,6 +142,9 @@ if ($ClientId -and $CertificateThumbprint -and -not $TenantId) {
 # Make all unhandled errors terminating so they propagate through the try/catch/finally structure
 $ErrorActionPreference = 'Stop'
 
+# Unattended runs: rendering Write-Progress is pure overhead and noise in pipeline logs
+if ($NonInteractive) { $ProgressPreference = 'SilentlyContinue' }
+
 # Script version — keep in sync with the .NOTES header above; surfaced in the report footer
 $ScriptVersion = 'V26.07.14'
 
@@ -304,11 +307,23 @@ function Get-EntraRoleLearnUrl {
 # App Registration lookup cache — both the owners and the credentials paths need the
 # application object, so fetch it once per AppId with a superset of the properties either
 # needs. $null is cached too, meaning "no App Registration exists in this tenant".
-$script:appRegistrationCache = @{}
+# For full-tenant scans the cache is pre-populated in one paged enumeration (see the bulk
+# pre-fetch block below); the completeness flags tell consumers a lookup miss is authoritative.
+$script:appRegistrationCache         = @{}
+$script:appRegistrationCacheComplete = $false
+$script:oauth2GrantsByClient         = @{}
+$script:oauth2GrantsComplete         = $false
+$script:roleAssignmentsByPrincipal   = @{}
+$script:roleDefinitionsById          = @{}
+$script:roleAssignmentsComplete      = $false
 function Get-AppRegistrationCached {
     param([string]$AppId)
     if ($script:appRegistrationCache.ContainsKey($AppId)) {
         return $script:appRegistrationCache[$AppId]
+    }
+    # After a completed bulk pre-fetch, a cache miss means no App Registration exists — skip the query
+    if ($script:appRegistrationCacheComplete) {
+        return $null
     }
     $app = $null
     try {
@@ -375,7 +390,9 @@ function Get-ServicePrincipalOwners {
         }
     }
 
-    # Get Service Principal owners — request display fields so no per-owner API call is needed
+    # Get Service Principal owners — request display fields so no per-owner API call is needed.
+    # Owners stay per-object (not bulk pre-fetched): $expand=owners on the list endpoint
+    # returns at most ~20 items per object with no nested paging, which would undercount.
     try {
         $spOwners = Get-MgServicePrincipalOwner -ServicePrincipalId $ServicePrincipalId -All `
             -Property 'id,displayName,userPrincipalName,appId' -ErrorAction SilentlyContinue
@@ -724,38 +741,57 @@ function Get-ApplicationCredentials {
 function Get-ServicePrincipalPermissions {
     param($ServicePrincipal)
     
-    # Get delegated permissions
-    $delegatedGrants = Invoke-MgWithRetry { Get-MgOauth2PermissionGrant -Filter "clientId eq '$($ServicePrincipal.Id)'" -All }
+    # Get delegated permissions — served from the bulk pre-fetch lookup when available
+    $delegatedGrants = if ($script:oauth2GrantsComplete) {
+        if ($script:oauth2GrantsByClient.ContainsKey($ServicePrincipal.Id)) { @($script:oauth2GrantsByClient[$ServicePrincipal.Id]) } else { @() }
+    } else {
+        Invoke-MgWithRetry { Get-MgOauth2PermissionGrant -Filter "clientId eq '$($ServicePrincipal.Id)'" -All }
+    }
 
-    # Get application permissions
+    # Get application permissions — per-app by necessity: Graph has no tenant-wide
+    # appRoleAssignment list endpoint (only per-principal and per-resource views)
     $appRoleAssignments = Invoke-MgWithRetry { Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $ServicePrincipal.Id -All }
-    
-    # Get directory role assignments
+
+    # Get directory role assignments — served from the bulk pre-fetch lookups when available
     $roleAssignments = @()
-    try {
-        $allRoleAssignments = Get-MgRoleManagementDirectoryRoleAssignment -Filter "principalId eq '$($ServicePrincipal.Id)'" -All -ErrorAction SilentlyContinue
-        foreach ($assignment in $allRoleAssignments) {
-            $roleDefinition = Get-MgRoleManagementDirectoryRoleDefinition -UnifiedRoleDefinitionId $assignment.RoleDefinitionId -ErrorAction SilentlyContinue
+    if ($script:roleAssignmentsComplete) {
+        $spRoleAssignments = if ($script:roleAssignmentsByPrincipal.ContainsKey($ServicePrincipal.Id)) { $script:roleAssignmentsByPrincipal[$ServicePrincipal.Id] } else { @() }
+        foreach ($assignment in $spRoleAssignments) {
+            $roleDefinition = $script:roleDefinitionsById[$assignment.RoleDefinitionId]
+            if (-not $roleDefinition) {
+                # Definition missing from the bulk lookup (unexpected) — fetch it individually
+                try { $roleDefinition = Get-MgRoleManagementDirectoryRoleDefinition -UnifiedRoleDefinitionId $assignment.RoleDefinitionId -ErrorAction SilentlyContinue } catch {}
+            }
             if ($roleDefinition) {
                 $roleAssignments += $roleDefinition
             }
         }
-    }
-    catch {
-        # Fallback method
+    } else {
         try {
-            $allDirectoryRoles = Get-MgDirectoryRole -All -ErrorAction SilentlyContinue
-            foreach ($role in $allDirectoryRoles) {
-                try {
-                    $roleMembers = Get-MgDirectoryRoleMember -DirectoryRoleId $role.Id -All -ErrorAction SilentlyContinue
-                    if ($roleMembers | Where-Object { $_.Id -eq $ServicePrincipal.Id }) {
-                        $roleAssignments += $role
-                    }
+            $allRoleAssignments = Get-MgRoleManagementDirectoryRoleAssignment -Filter "principalId eq '$($ServicePrincipal.Id)'" -All -ErrorAction SilentlyContinue
+            foreach ($assignment in $allRoleAssignments) {
+                $roleDefinition = Get-MgRoleManagementDirectoryRoleDefinition -UnifiedRoleDefinitionId $assignment.RoleDefinitionId -ErrorAction SilentlyContinue
+                if ($roleDefinition) {
+                    $roleAssignments += $roleDefinition
                 }
-                catch { continue }
             }
         }
-        catch { Write-Warning "Could not retrieve directory role assignments for $($ServicePrincipal.DisplayName)" }
+        catch {
+            # Fallback method
+            try {
+                $allDirectoryRoles = Get-MgDirectoryRole -All -ErrorAction SilentlyContinue
+                foreach ($role in $allDirectoryRoles) {
+                    try {
+                        $roleMembers = Get-MgDirectoryRoleMember -DirectoryRoleId $role.Id -All -ErrorAction SilentlyContinue
+                        if ($roleMembers | Where-Object { $_.Id -eq $ServicePrincipal.Id }) {
+                            $roleAssignments += $role
+                        }
+                    }
+                    catch { continue }
+                }
+            }
+            catch { Write-Warning "Could not retrieve directory role assignments for $($ServicePrincipal.DisplayName)" }
+        }
     }
     
     # Calculate total permission count for filtering
@@ -861,7 +897,7 @@ if ($TargetAppId) {
     }
 } else {
     # Get service principals that match the Entra ID portal "Enterprise Applications" filter
-    $servicePrincipals = Get-MgServicePrincipal -All -Property $servicePrincipalProperties | Where-Object {
+    $servicePrincipals = Invoke-MgWithRetry { Get-MgServicePrincipal -All -Property $servicePrincipalProperties } | Where-Object {
         $_.ServicePrincipalType -eq "Application" -and
         #$_.AppOwnerOrganizationId -ne "f8cdef31-a31e-4b4a-93e4-5f571e91255a" -and
         $_.AppId -notin @(
@@ -882,6 +918,45 @@ if ($TargetAppId) {
 }
 
 Write-Host "Found $($servicePrincipals.Count) Enterprise Applications" -ForegroundColor Green
+
+# BULK PRE-FETCH (full-tenant scans only): fetch app registrations, OAuth2 grants and
+# directory role assignments once as paged tenant-wide enumerations instead of one filtered
+# Graph call per app — for N apps this collapses ~3N requests into ~3. The remaining per-app
+# calls are owners (x2) and appRoleAssignments (no tenant-wide endpoint / $expand caveats).
+# Each completeness flag is set only after its enumeration succeeds; on failure the flag stays
+# $false and every consumer transparently falls back to the original per-app call.
+if (-not $TargetAppId) {
+    try {
+        Write-Host "Pre-fetching App Registrations, OAuth2 grants and role assignments (bulk)..." -ForegroundColor Green
+
+        Invoke-MgWithRetry { Get-MgApplication -All -Property 'Id,AppId,PasswordCredentials,KeyCredentials' } |
+            ForEach-Object { $script:appRegistrationCache[$_.AppId] = $_ }
+        $script:appRegistrationCacheComplete = $true
+
+        Invoke-MgWithRetry { Get-MgOauth2PermissionGrant -All } | ForEach-Object {
+            if (-not $script:oauth2GrantsByClient.ContainsKey($_.ClientId)) {
+                $script:oauth2GrantsByClient[$_.ClientId] = [System.Collections.Generic.List[object]]::new()
+            }
+            $script:oauth2GrantsByClient[$_.ClientId].Add($_)
+        }
+        $script:oauth2GrantsComplete = $true
+
+        Invoke-MgWithRetry { Get-MgRoleManagementDirectoryRoleAssignment -All } | ForEach-Object {
+            if (-not $script:roleAssignmentsByPrincipal.ContainsKey($_.PrincipalId)) {
+                $script:roleAssignmentsByPrincipal[$_.PrincipalId] = [System.Collections.Generic.List[object]]::new()
+            }
+            $script:roleAssignmentsByPrincipal[$_.PrincipalId].Add($_)
+        }
+        Invoke-MgWithRetry { Get-MgRoleManagementDirectoryRoleDefinition -All } |
+            ForEach-Object { $script:roleDefinitionsById[$_.Id] = $_ }
+        $script:roleAssignmentsComplete = $true
+
+        Write-Host "  Cached $($script:appRegistrationCache.Count) app registrations, OAuth2 grants for $($script:oauth2GrantsByClient.Count) clients, role assignments for $($script:roleAssignmentsByPrincipal.Count) principals" -ForegroundColor Cyan
+    }
+    catch {
+        Write-Warning "Bulk pre-fetch failed ($($_.Exception.Message)) — falling back to per-app Graph calls."
+    }
+}
 
 # Caches populated during pre-filtering and reused in the main processing loop
 $credentialCache  = @{}
@@ -2790,6 +2865,44 @@ if ($OnlyWithPermissions -or $MinimumPermissions -gt 0 -or $OnlyWithAppRegistrat
     Write-Host "`n⚡ Performance Optimization:" -ForegroundColor Green
     Write-Host "  - Pre-filtering optimization was applied" -ForegroundColor Green
     Write-Host "  - Analysis was only performed on filtered applications" -ForegroundColor Green
+}
+
+# Azure DevOps integration — emit pipeline-native signals when running on an ADO agent
+# (TF_BUILD is set by the agent). No effect on local or interactive runs.
+if ($env:TF_BUILD -eq 'True') {
+    if ($criticalRiskApps -gt 0) {
+        Write-Host "##vso[task.logissue type=warning]$criticalRiskApps Critical-risk application(s) found — review the EntraIDAppReport artifact."
+        Write-Host "##vso[task.complete result=SucceededWithIssues;]Critical-risk applications found"
+    }
+
+    # Markdown summary shown as a tab on the pipeline run (same numbers as the console summary)
+    $adoSummaryMd = @"
+# Entra ID App Report — $tenantName
+
+Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm') · **$totalApps** Enterprise Applications analyzed
+
+| Risk level | Apps |
+|------------|------|
+| Critical | $criticalRiskApps |
+| High | $highRiskApps |
+| Medium | $mediumRiskApps |
+| Low | $lowRiskApps |
+
+| Governance signal | Apps |
+|-------------------|------|
+| No owners | $appsWithoutOwners |
+| Open access (Assignment Required = No) | $appsWithOpenAccess |
+| Ownership gaps | $appsWithOwnershipGaps |
+| Expiring credentials (30 days) | $appsWithExpiringCredentials |
+| Third-party apps | $externalApps |
+| Third-party without verified publisher | $appsWithUnverifiedPublisher |
+| Disabled apps | $disabledApps |
+
+Download the full interactive HTML report from the **EntraIDAppReport** pipeline artifact.
+"@
+    $adoSummaryPath = Join-Path ([System.IO.Path]::GetTempPath()) 'EntraIDAppReport-summary.md'
+    [System.IO.File]::WriteAllText($adoSummaryPath, $adoSummaryMd, [System.Text.UTF8Encoding]::new($false))
+    Write-Host "##vso[task.uploadsummary]$adoSummaryPath"
 }
 
     Write-Host "`nScript completed successfully!" -ForegroundColor Green
