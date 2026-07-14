@@ -37,6 +37,11 @@
 .PARAMETER NonInteractive
     Optional. Suppress all interactive prompts. Required for unattended/pipeline runs.
     Also suppresses automatic browser launch after report generation.
+.PARAMETER TargetAppId
+    Optional. Scan a single Enterprise Application instead of the whole tenant. Accepts either the
+    Application (client) ID (AppId) or the Service Principal object ID. Skips the full tenant enumeration
+    and the confirmation prompt for a fast, targeted run. Cannot be combined with -OnlyWithPermissions,
+    -MinimumPermissions, -OnlyWithAppRegistrations or -OnlyServicePrincipals.
 .PARAMETER OnlyWithPermissions
     Include only applications that have at least one permission (delegated, application or directory role).
 .PARAMETER MinimumPermissions
@@ -82,6 +87,9 @@
 .EXAMPLE
     # List only apps with at least 5 permissions
     .\Get-EntraIDAppReport.ps1 -MinimumPermissions 5
+.EXAMPLE
+    # Quickly scan a single application by its Application (client) ID
+    .\Get-EntraIDAppReport.ps1 -TargetAppId "11111111-2222-3333-4444-555555555555"
     #>
 
 [CmdletBinding()]
@@ -96,6 +104,7 @@ param(
     [switch]$UseManagedIdentity,
     [switch]$NonInteractive,
     # Filtering
+    [string]$TargetAppId = "",
     [switch]$OnlyWithPermissions,
     [ValidateRange(0, [int]::MaxValue)]
     [int]$MinimumPermissions = 0,
@@ -109,6 +118,10 @@ param(
 # Validate mutually exclusive parameters
 if ($OnlyWithAppRegistrations -and $OnlyServicePrincipals) {
     Write-Error "-OnlyWithAppRegistrations and -OnlyServicePrincipals are mutually exclusive. Use one or the other."
+    exit 1
+}
+if ($TargetAppId -and ($OnlyWithPermissions -or $MinimumPermissions -gt 0 -or $OnlyWithAppRegistrations -or $OnlyServicePrincipals)) {
+    Write-Error "-TargetAppId cannot be combined with -OnlyWithPermissions, -MinimumPermissions, -OnlyWithAppRegistrations or -OnlyServicePrincipals."
     exit 1
 }
 if (($ClientId -or $CertificateThumbprint) -and -not $TenantId) {
@@ -414,6 +427,7 @@ function Get-RiskScore {
         [bool]$UsesPasswordSecrets,
         [int]$SecretCount,
         [bool]$HasLongLivedCredentials,
+        [bool]$HasServicePrincipalCredentials = $false,
         [bool]$IsEnabled = $true,
         [bool]$IsVerifiedPublisher = $false,
         [bool]$IsHighValueTargetApp = $false,
@@ -504,27 +518,12 @@ function Get-RiskScore {
         $score += 3
         $riskFactors += [PSCustomObject]@{ Text = "Sensitive permission granted via User Consent, no admin review (governance blind spot)"; Points = 3 }
     }
-        
-    # Enhanced ownership checks
-    if (-not $HasAnyOwners) {
-        $score += 4
-        $riskFactors += [PSCustomObject]@{ Text = "No owners assigned (neither Service Principal nor App Registration)"; Points = 4 }
-    }
-    elseif (-not $HasServicePrincipalOwners -and $HasAppRegistration) {
-        $score += 2
-        $riskFactors += [PSCustomObject]@{ Text = "No Service Principal owners (only App Registration owners)"; Points = 2 }
-    }
-    elseif (-not $HasAppRegistrationOwners -and $HasAppRegistration) {
-        $score += 2
-        $riskFactors += [PSCustomObject]@{ Text = "No App Registration owners (only Service Principal owners)"; Points = 2 }
-    }
-    
-    # Ownership gap detection (only for internal applications)
-    if ($HasAppRegistration -and $isInternalApp -and ($HasServicePrincipalOwners -ne $HasAppRegistrationOwners)) {
-        $score += 1
-        $riskFactors += [PSCustomObject]@{ Text = "Ownership gap - owners differ between Service Principal and App Registration"; Points = 1 }
-    }
-    
+
+    # Note: Ownership state (no owners / SP-only / App Registration-only / ownership gap) is
+    # surfaced elsewhere in the report (Owners column, badges and filters) but is intentionally
+    # NOT scored here — missing or mismatched ownership is a governance signal, not itself a
+    # security risk factor.
+
     # Assignment not required (open access risk) — this setting governs ONLY the delegated /
     # interactive sign-in path (who can sign in to the app as themselves). It has NO effect on
     # Application (client credentials) permissions or Directory Roles held by the service
@@ -572,6 +571,13 @@ function Get-RiskScore {
         $riskFactors += [PSCustomObject]@{ Text = "Long-lived credentials (expiry > 1 year)"; Points = 5 }
     }
 
+    # Credentials added directly to the Service Principal are less visible and less commonly
+    # reviewed than those on the App Registration — flag with a higher weight so it stands out.
+    if ($HasServicePrincipalCredentials) {
+        $score += 10
+        $riskFactors += [PSCustomObject]@{ Text = "Credential added directly to the Service Principal"; Points = 10; Detail = "Credentials on the Service Principal are less visible and less commonly reviewed than those on the App Registration. Check who added it and why." }
+    }
+
     # External apps are registered in another tenant. No control over registration or credential rotation
     # Microsoft owned apps are excluded as they are trusted first-party services
     if (-not $IsInternalApp -and -not $IsMicrosoftApp) {
@@ -593,7 +599,7 @@ function Get-RiskScore {
     # Score thresholds:
     #   Low < 15 ≤ Medium < 35 ≤ High < 50 ≤ Critical
     # Calibration reference points:
-    #   Assignment not required + no owners (5+4) → Low
+    #   Assignment not required + external app (5+5) → Low
     #   One medium-risk perm + app-type + open access + secrets (5+5+5+5) → Medium
     #   Two high-risk perms + app-type + open access + secrets + long-lived (20+5+5+5+5) → High
     #   Two high-risk perms + app-type + high-value open access + secrets + long-lived (20+5+15+5+5) → Critical
@@ -614,14 +620,16 @@ function Get-ApplicationCredentials {
     $now = Get-Date
     $expiryThreshold = $now.AddDays(30)
 
-    # Service Principal's own credentials (can be assigned directly, e.g. via PowerShell, even without an App Registration)
-    $spActiveSecrets  = @($ServicePrincipal.PasswordCredentials | Where-Object { $_.EndDateTime -gt $now })
-    $spActiveCerts    = @($ServicePrincipal.KeyCredentials | Where-Object { $_.EndDateTime -gt $now })
+    # Service Principal's own credentials (can be assigned directly, e.g. via PowerShell, even without an App Registration).
+    # Tagged with Source = 'ServicePrincipal' so the report can flag credentials added directly to the
+    # Service Principal instead of the App Registration.
+    $spActiveSecrets  = @($ServicePrincipal.PasswordCredentials | Where-Object { $_.EndDateTime -gt $now } | ForEach-Object { [PSCustomObject]@{ DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = 'ServicePrincipal' } })
+    $spActiveCerts    = @($ServicePrincipal.KeyCredentials | Where-Object { $_.EndDateTime -gt $now } | ForEach-Object { [PSCustomObject]@{ DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = 'ServicePrincipal' } })
     $spExpiring       = @(@($ServicePrincipal.PasswordCredentials) + @($ServicePrincipal.KeyCredentials) | Where-Object {
         $_.EndDateTime -gt $now -and $_.EndDateTime -lt $expiryThreshold
     })
-    $spExpiredSecrets = @($ServicePrincipal.PasswordCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now })
-    $spExpiredCerts   = @($ServicePrincipal.KeyCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now })
+    $spExpiredSecrets = @($ServicePrincipal.PasswordCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now } | ForEach-Object { [PSCustomObject]@{ DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = 'ServicePrincipal' } })
+    $spExpiredCerts   = @($ServicePrincipal.KeyCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now } | ForEach-Object { [PSCustomObject]@{ DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = 'ServicePrincipal' } })
 
     $hasAppReg = $false
     $appRegId = $null
@@ -636,13 +644,13 @@ function Get-ApplicationCredentials {
         if ($app) {
             $hasAppReg = $true
             $appRegId = $app.Id
-            $appActiveSecrets  = @($app.PasswordCredentials | Where-Object { $_.EndDateTime -gt $now })
-            $appActiveCerts    = @($app.KeyCredentials | Where-Object { $_.EndDateTime -gt $now })
+            $appActiveSecrets  = @($app.PasswordCredentials | Where-Object { $_.EndDateTime -gt $now } | ForEach-Object { [PSCustomObject]@{ DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = 'AppRegistration' } })
+            $appActiveCerts    = @($app.KeyCredentials | Where-Object { $_.EndDateTime -gt $now } | ForEach-Object { [PSCustomObject]@{ DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = 'AppRegistration' } })
             $appExpiring       = @(@($app.PasswordCredentials) + @($app.KeyCredentials) | Where-Object {
                 $_.EndDateTime -gt $now -and $_.EndDateTime -lt $expiryThreshold
             })
-            $appExpiredSecrets = @($app.PasswordCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now })
-            $appExpiredCerts   = @($app.KeyCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now })
+            $appExpiredSecrets = @($app.PasswordCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now } | ForEach-Object { [PSCustomObject]@{ DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = 'AppRegistration' } })
+            $appExpiredCerts   = @($app.KeyCredentials | Where-Object { $_.EndDateTime -ne $null -and $_.EndDateTime -le $now } | ForEach-Object { [PSCustomObject]@{ DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = 'AppRegistration' } })
         }
     }
     catch {
@@ -659,6 +667,10 @@ function Get-ApplicationCredentials {
     $allActiveCreds = @($spActiveSecrets) + @($appActiveSecrets) + @($spActiveCerts) + @($appActiveCerts)
     $hasLongLived = ($allActiveCreds | Where-Object { $_.EndDateTime -gt $longLivedThreshold }).Count -gt 0
 
+    # Any active secret or certificate added directly to the Service Principal (rather than the
+    # App Registration) — less visible and less commonly reviewed, so flagged as its own risk factor.
+    $hasServicePrincipalCredentials = ($spActiveSecrets.Count -gt 0 -or $spActiveCerts.Count -gt 0)
+
     return @{
         HasAppRegistration   = $hasAppReg
         AppRegistrationId    = $appRegId
@@ -670,6 +682,7 @@ function Get-ApplicationCredentials {
         UsesPasswordSecrets  = ($totalActiveSecrets -gt 0)
         SecretCount          = $totalActiveSecrets
         HasLongLivedCredentials = $hasLongLived
+        HasServicePrincipalCredentials = $hasServicePrincipalCredentials
         ActiveCertificateList  = @($spActiveCerts) + @($appActiveCerts)
         ActiveSecretList       = @($spActiveSecrets) + @($appActiveSecrets)
         ExpiredCertificateList = @($spExpiredCerts) + @($appExpiredCerts)
@@ -790,29 +803,46 @@ Write-Host "Gathering Enterprise Applications..." -ForegroundColor Green
 # Cache once — avoids repeated Get-MgContext calls inside loops
 $currentTenantId = (Get-MgContext).TenantId
 
-# Get service principals that match the Entra ID portal "Enterprise Applications" filter
-$servicePrincipals = Get-MgServicePrincipal -All -Property @(
+$servicePrincipalProperties = @(
     "Id", "AppId", "DisplayName", "AppOwnerOrganizationId",
     "ServicePrincipalType", "AppRoles", "Oauth2PermissionScopes", "SignInAudience",
     "Tags", "AppDisplayName", "CreatedDateTime", "Owners", "AppRoleAssignmentRequired", "AccountEnabled",
     "PasswordCredentials", "KeyCredentials", "VerifiedPublisher"
-) | Where-Object {
-    $_.ServicePrincipalType -eq "Application" -and
-    #$_.AppOwnerOrganizationId -ne "f8cdef31-a31e-4b4a-93e4-5f571e91255a" -and
-    $_.AppId -notin @(
-        "00000003-0000-0000-c000-000000000000", # Microsoft Graph
-        "00000002-0000-0ff1-ce00-000000000000", # Office 365 Exchange Online
-        "00000003-0000-0ff1-ce00-000000000000", # Office 365 SharePoint Online
-        "c5393580-f805-4401-95e8-94b7a6ef2fc2", # Office 365 Management APIs
-        "d3590ed6-52b3-4102-aeff-aad2292ab01c", # Microsoft Office
-        "797f4846-ba00-4fd7-ba43-dac1f8f63013"  # Windows Azure Service Management API
-        # NOTE: Azure PowerShell (1950a258...), Azure AD PowerShell (1b730954...) and Microsoft Graph
-        # PowerShell (09abbdfd...) are intentionally NOT excluded so they can be surfaced and
-        # risk-scored as high-value target apps.
-    ) -and
-    ($_.Tags -contains "WindowsAzureActiveDirectoryIntegratedApp" -or
-     $_.AppOwnerOrganizationId -eq $currentTenantId -or
-     $_.SignInAudience -in @("AzureADMyOrg", "AzureADMultipleOrgs", "AzureADandPersonalMicrosoftAccount"))
+)
+
+if ($TargetAppId) {
+    # Targeted single-app scan — skip full tenant enumeration for a fast, quick lookup.
+    # Accepts either the Application (client) ID or the Service Principal object ID.
+    Write-Host "Targeted scan requested for '$TargetAppId' — skipping full tenant enumeration" -ForegroundColor Cyan
+    $servicePrincipals = @(Get-MgServicePrincipal -Filter "appId eq '$TargetAppId'" -Property $servicePrincipalProperties -ErrorAction SilentlyContinue)
+    if ($servicePrincipals.Count -eq 0) {
+        $targetSp = Get-MgServicePrincipal -ServicePrincipalId $TargetAppId -Property $servicePrincipalProperties -ErrorAction SilentlyContinue
+        if ($targetSp) { $servicePrincipals = @($targetSp) }
+    }
+    if ($servicePrincipals.Count -eq 0) {
+        Write-Error "No Enterprise Application found matching -TargetAppId '$TargetAppId' (checked both AppId and Service Principal object ID)."
+        exit 1
+    }
+} else {
+    # Get service principals that match the Entra ID portal "Enterprise Applications" filter
+    $servicePrincipals = Get-MgServicePrincipal -All -Property $servicePrincipalProperties | Where-Object {
+        $_.ServicePrincipalType -eq "Application" -and
+        #$_.AppOwnerOrganizationId -ne "f8cdef31-a31e-4b4a-93e4-5f571e91255a" -and
+        $_.AppId -notin @(
+            "00000003-0000-0000-c000-000000000000", # Microsoft Graph
+            "00000002-0000-0ff1-ce00-000000000000", # Office 365 Exchange Online
+            "00000003-0000-0ff1-ce00-000000000000", # Office 365 SharePoint Online
+            "c5393580-f805-4401-95e8-94b7a6ef2fc2", # Office 365 Management APIs
+            "d3590ed6-52b3-4102-aeff-aad2292ab01c", # Microsoft Office
+            "797f4846-ba00-4fd7-ba43-dac1f8f63013"  # Windows Azure Service Management API
+            # NOTE: Azure PowerShell (1950a258...), Azure AD PowerShell (1b730954...) and Microsoft Graph
+            # PowerShell (09abbdfd...) are intentionally NOT excluded so they can be surfaced and
+            # risk-scored as high-value target apps.
+        ) -and
+        ($_.Tags -contains "WindowsAzureActiveDirectoryIntegratedApp" -or
+         $_.AppOwnerOrganizationId -eq $currentTenantId -or
+         $_.SignInAudience -in @("AzureADMyOrg", "AzureADMultipleOrgs", "AzureADandPersonalMicrosoftAccount"))
+    }
 }
 
 Write-Host "Found $($servicePrincipals.Count) Enterprise Applications" -ForegroundColor Green
@@ -874,8 +904,8 @@ if ($OnlyWithPermissions -or $MinimumPermissions -gt 0 -or $OnlyWithAppRegistrat
     $servicePrincipals = $filteredServicePrincipals
 }
 
-# Confirmation prompt (skipped in non-interactive / pipeline mode)
-if (-not $NonInteractive) {
+# Confirmation prompt (skipped in non-interactive / pipeline mode, or for a targeted single-app scan)
+if (-not $NonInteractive -and -not $TargetAppId) {
     Write-Host "`n" -NoNewline
     $confirmation = Read-Host "Continue with detailed analysis of $($servicePrincipals.Count) applications? (Y/N)"
     if ($confirmation -notmatch '^[Yy]') {
@@ -884,7 +914,7 @@ if (-not $NonInteractive) {
         exit 0
     }
 } else {
-    Write-Host "Processing $($servicePrincipals.Count) applications (non-interactive mode)..." -ForegroundColor Cyan
+    Write-Host "Processing $($servicePrincipals.Count) applications..." -ForegroundColor Cyan
 }
 
 Write-Host "`nProceeding with analysis..." -ForegroundColor Green
@@ -1027,6 +1057,7 @@ foreach ($sp in $servicePrincipals) {
         -UsesPasswordSecrets $credentials.UsesPasswordSecrets `
         -SecretCount $credentials.SecretCount `
         -HasLongLivedCredentials $credentials.HasLongLivedCredentials `
+        -HasServicePrincipalCredentials $credentials.HasServicePrincipalCredentials `
         -IsEnabled $isEnabled `
         -IsVerifiedPublisher $isVerifiedPublisher `
         -IsHighValueTargetApp $isHighValueTargetApp `
@@ -2199,7 +2230,8 @@ foreach ($app in $sortedReport) {
             $cEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $cKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
             $cEndClass = if ($_.EndDateTime -and $_.EndDateTime -le (Get-Date)) { "expired-date" } elseif ($_.EndDateTime -and $_.EndDateTime -lt (Get-Date).AddDays(30)) { "expiring-date" } else { "" }
-            "<tr><td style='padding:4px 8px'>$cName</td><td style='padding:4px 8px'>$cStart</td><td style='padding:4px 8px' class='$cEndClass'>$cEnd</td><td style='padding:4px 8px'><code>$cKeyId</code></td></tr>"
+            $cSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' style='margin-right:6px' title='Added directly to the Service Principal instead of the App Registration.'>SP Credential</span>" } else { "" }
+            "<tr><td style='padding:4px 8px'>$cSpBadge$cName</td><td style='padding:4px 8px'>$cStart</td><td style='padding:4px 8px' class='$cEndClass'>$cEnd</td><td style='padding:4px 8px'><code>$cKeyId</code></td></tr>"
         }) -join ""
         $certsModalHtml = "<table id='certsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('certsModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('certsModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('certsModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('certsModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$certRows</tbody></table>"
     } else {
@@ -2214,7 +2246,8 @@ foreach ($app in $sortedReport) {
             $sEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $sKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
             $sEndClass = if ($_.EndDateTime -and $_.EndDateTime -le (Get-Date)) { "expired-date" } elseif ($_.EndDateTime -and $_.EndDateTime -lt (Get-Date).AddDays(30)) { "expiring-date" } else { "" }
-            "<tr><td style='padding:4px 8px'>$sName</td><td style='padding:4px 8px'>$sStart</td><td style='padding:4px 8px' class='$sEndClass'>$sEnd</td><td style='padding:4px 8px'><code>$sKeyId</code></td></tr>"
+            $sSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' style='margin-right:6px' title='Added directly to the Service Principal instead of the App Registration.'>SP Credential</span>" } else { "" }
+            "<tr><td style='padding:4px 8px'>$sSpBadge$sName</td><td style='padding:4px 8px'>$sStart</td><td style='padding:4px 8px' class='$sEndClass'>$sEnd</td><td style='padding:4px 8px'><code>$sKeyId</code></td></tr>"
         }) -join ""
         $secretsModalHtml = "<table id='secretsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('secretsModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('secretsModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('secretsModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('secretsModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$secretRows</tbody></table>"
     } else {
@@ -2222,16 +2255,16 @@ foreach ($app in $sortedReport) {
     }
     # Expiring / Expired credentials modals — combined certs + secrets, filtered to the relevant status
     $allCredsForStatus = @()
-    if ($app.ActiveCertificateList) { $allCredsForStatus += ($app.ActiveCertificateList | ForEach-Object { [PSCustomObject]@{ Kind = "Certificate"; DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
-    if ($app.ActiveSecretList)      { $allCredsForStatus += ($app.ActiveSecretList      | ForEach-Object { [PSCustomObject]@{ Kind = "Secret";      DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
+    if ($app.ActiveCertificateList) { $allCredsForStatus += ($app.ActiveCertificateList | ForEach-Object { [PSCustomObject]@{ Kind = "Certificate"; DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = $_.Source } }) }
+    if ($app.ActiveSecretList)      { $allCredsForStatus += ($app.ActiveSecretList      | ForEach-Object { [PSCustomObject]@{ Kind = "Secret";      DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = $_.Source } }) }
     $credStatusNow = Get-Date
     $expiringCredList = @($allCredsForStatus | Where-Object { $_.EndDateTime -and $_.EndDateTime -gt $credStatusNow -and $_.EndDateTime -lt $credStatusNow.AddDays(30) })
 
     # Expired credentials are excluded from the Active* lists above, so they must be sourced
     # from the dedicated Expired* lists returned by Get-ApplicationCredentials.
     $allExpiredCredsForStatus = @()
-    if ($app.ExpiredCertificateList) { $allExpiredCredsForStatus += ($app.ExpiredCertificateList | ForEach-Object { [PSCustomObject]@{ Kind = "Certificate"; DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
-    if ($app.ExpiredSecretList)      { $allExpiredCredsForStatus += ($app.ExpiredSecretList      | ForEach-Object { [PSCustomObject]@{ Kind = "Secret";      DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId } }) }
+    if ($app.ExpiredCertificateList) { $allExpiredCredsForStatus += ($app.ExpiredCertificateList | ForEach-Object { [PSCustomObject]@{ Kind = "Certificate"; DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = $_.Source } }) }
+    if ($app.ExpiredSecretList)      { $allExpiredCredsForStatus += ($app.ExpiredSecretList      | ForEach-Object { [PSCustomObject]@{ Kind = "Secret";      DisplayName = $_.DisplayName; StartDateTime = $_.StartDateTime; EndDateTime = $_.EndDateTime; KeyId = $_.KeyId; Source = $_.Source } }) }
     $expiredCredList  = @($allExpiredCredsForStatus | Where-Object { $_.EndDateTime -and $_.EndDateTime -le $credStatusNow })
 
     $expiringModalTitle = "Expiring Credentials for $($app.DisplayName)"
@@ -2242,7 +2275,8 @@ foreach ($app in $sortedReport) {
             $xStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $xEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $xKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
-            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expiring-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
+            $xSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' style='margin-right:6px' title='Added directly to the Service Principal instead of the App Registration.'>SP Credential</span>" } else { "" }
+            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xSpBadge$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expiring-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
         }) -join ""
         $expiringModalHtml = "<table id='expiringModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('expiringModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('expiringModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('expiringModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('expiringModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('expiringModalTable',4,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$expiringRows</tbody></table>"
     } else {
@@ -2257,7 +2291,8 @@ foreach ($app in $sortedReport) {
             $xStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $xEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $xKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
-            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expired-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
+            $xSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' style='margin-right:6px' title='Added directly to the Service Principal instead of the App Registration.'>SP Credential</span>" } else { "" }
+            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xSpBadge$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expired-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
         }) -join ""
         $expiredModalHtml = "<table id='expiredModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('expiredModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('expiredModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('expiredModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('expiredModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('expiredModalTable',4,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$expiredRows</tbody></table>"
     } else {
