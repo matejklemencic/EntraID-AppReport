@@ -13,7 +13,7 @@
     Version:        V26.07.14
 
     Installation: Install the required Microsoft Graph modules (install each separately to use -MinimumVersion):
-    @('Microsoft.Graph.Authentication','Microsoft.Graph.Applications','Microsoft.Graph.Identity.SignIns','Microsoft.Graph.Identity.DirectoryManagement','Microsoft.Graph.Users') | ForEach-Object { Install-Module $_ -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber }
+    @('Microsoft.Graph.Authentication','Microsoft.Graph.Applications','Microsoft.Graph.Identity.SignIns','Microsoft.Graph.Identity.DirectoryManagement','Microsoft.Graph.Identity.Governance','Microsoft.Graph.Users') | ForEach-Object { Install-Module $_ -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber }
     Or install the full umbrella module:
     Install-Module -Name Microsoft.Graph -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber
 .OUTPUTS
@@ -824,6 +824,11 @@ Import-GraphModuleSafely "Microsoft.Graph.Authentication"
 Import-GraphModuleSafely "Microsoft.Graph.Applications"
 Import-GraphModuleSafely "Microsoft.Graph.Identity.SignIns"
 Import-GraphModuleSafely "Microsoft.Graph.Identity.DirectoryManagement"
+# Identity.Governance provides Get-MgRoleManagementDirectoryRoleAssignment/-RoleDefinition.
+# Import it explicitly: relying on command auto-load can resolve a DIFFERENT module version
+# than the already-loaded Microsoft.Graph.Authentication assembly and fail with an assembly
+# version conflict (seen on ADO hosted agents that preinstall their own Microsoft.Graph set).
+Import-GraphModuleSafely "Microsoft.Graph.Identity.Governance"
 Import-GraphModuleSafely "Microsoft.Graph.Users"
 
 # Connect to Microsoft Graph
@@ -1036,10 +1041,20 @@ $resourceSpCache = @{}
 $report = @()
 $processedCount = 0
 
+# Unconditional heartbeat (~20 lines total, regardless of tenant size) so long unattended runs
+# stay visible in logs that don't render Write-Progress and aren't run with -Verbose (e.g. Azure
+# DevOps). Elapsed time per batch also helps spot Graph throttling: a sudden slowdown between
+# heartbeats usually means 429 backoff sleeps, not a hang.
+$heartbeatInterval = [Math]::Max(1, [Math]::Ceiling($servicePrincipals.Count / 20))
+$processingStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
 foreach ($sp in $servicePrincipals) {
     $processedCount++
     Write-Progress -Activity "Processing applications" -Status "Processing $($sp.DisplayName)" -PercentComplete (($processedCount / $servicePrincipals.Count) * 100)
     Write-Verbose "Processing: $($sp.DisplayName) ($processedCount/$($servicePrincipals.Count))"
+    if ($processedCount % $heartbeatInterval -eq 0 -or $processedCount -eq $servicePrincipals.Count) {
+        Write-Host "  ...processed $processedCount/$($servicePrincipals.Count) applications ($([Math]::Round($processingStopwatch.Elapsed.TotalSeconds))s elapsed)" -ForegroundColor DarkGray
+    }
 
     # Reuse pre-filtering result if available; otherwise fetch now
     $permissionInfo = if ($permissionCache.ContainsKey($sp.Id)) {

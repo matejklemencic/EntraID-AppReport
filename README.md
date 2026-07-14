@@ -72,6 +72,7 @@ The following modules are required at version 2.0.0 or later:
     'Microsoft.Graph.Applications',
     'Microsoft.Graph.Identity.SignIns',
     'Microsoft.Graph.Identity.DirectoryManagement',
+    'Microsoft.Graph.Identity.Governance',
     'Microsoft.Graph.Users'
 ) | ForEach-Object {
     Install-Module -Name $_ -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber

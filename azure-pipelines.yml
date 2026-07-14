@@ -38,7 +38,9 @@ steps:
   - task: Cache@2
     displayName: "Cache Microsoft Graph modules"
     inputs:
-      key: 'psmodules | "$(Agent.OS)" | graph-v2'
+      # Bump the trailing suffix whenever the module list below changes — Cache@2 only
+      # saves on a key miss, so a stale key would never persist newly added modules.
+      key: 'psmodules | "$(Agent.OS)" | graph-v3'
       path: $(psModuleCache)
 
   # Save-PSResource (PSResourceGet, ships with PowerShell 7.4+) is much faster than
@@ -51,6 +53,7 @@ steps:
           'Microsoft.Graph.Applications',
           'Microsoft.Graph.Identity.SignIns',
           'Microsoft.Graph.Identity.DirectoryManagement',
+          'Microsoft.Graph.Identity.Governance',
           'Microsoft.Graph.Users'
       ) | ForEach-Object {
           if (Test-Path (Join-Path "$(psModuleCache)" $_)) {
