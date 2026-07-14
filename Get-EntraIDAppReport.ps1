@@ -1232,6 +1232,7 @@ foreach ($sp in $servicePrincipals) {
         UsesPasswordSecrets     = $credentials.UsesPasswordSecrets
         SecretCount             = $credentials.SecretCount
         HasLongLivedCredentials = $credentials.HasLongLivedCredentials
+        HasServicePrincipalCredentials = $credentials.HasServicePrincipalCredentials
         ActiveCertificateList   = $credentials.ActiveCertificateList
         ActiveSecretList        = $credentials.ActiveSecretList
         ExpiredCertificateList  = $credentials.ExpiredCertificateList
@@ -1992,6 +1993,7 @@ $html = @"
             <span class="filter-group-label">Credentials</span>
             <span class="filter-tag c-green" data-group="credentials" data-value="certs"    onclick="toggleTag(this)">Has Certs <span class="cnt"></span></span>
             <span class="filter-tag c-amber"  data-group="credentials" data-value="secrets"  onclick="toggleTag(this)">Has Secrets <span class="cnt"></span></span>
+            <span class="filter-tag c-red"    data-group="credentials" data-value="sp-creds" onclick="toggleTag(this)">Has SP Credentials <span class="cnt"></span></span>
             <span class="filter-tag c-orange" data-group="credentials" data-value="expiring" onclick="toggleTag(this)">Expiring <span class="cnt"></span></span>
             <span class="filter-tag c-red"    data-group="credentials" data-value="expired"  onclick="toggleTag(this)">Expired <span class="cnt"></span></span>
         </div>
@@ -2356,7 +2358,7 @@ foreach ($app in $sortedReport) {
             $cEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $cKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
             $cEndClass = if ($_.EndDateTime -and $_.EndDateTime -le (Get-Date)) { "expired-date" } elseif ($_.EndDateTime -and $_.EndDateTime -lt (Get-Date).AddDays(30)) { "expiring-date" } else { "" }
-            $cSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' style='margin-right:6px' title='Added directly to the Service Principal instead of the App Registration.'>SP Credential</span>" } else { "" }
+            $cSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' onclick=`"addFilter('credentials','sp-creds'); toggleFilterPanel(true); closeDetailModal();`" style='margin-right:6px;cursor:pointer' title='Added directly to the Service Principal instead of the App Registration. Click to filter.'>SP Credential</span>" } else { "" }
             "<tr><td style='padding:4px 8px'>$cSpBadge$cName</td><td style='padding:4px 8px'>$cStart</td><td style='padding:4px 8px' class='$cEndClass'>$cEnd</td><td style='padding:4px 8px'><code>$cKeyId</code></td></tr>"
         }) -join ""
         $certsModalHtml = "<table id='certsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('certsModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('certsModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('certsModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('certsModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$certRows</tbody></table>"
@@ -2372,7 +2374,7 @@ foreach ($app in $sortedReport) {
             $sEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $sKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
             $sEndClass = if ($_.EndDateTime -and $_.EndDateTime -le (Get-Date)) { "expired-date" } elseif ($_.EndDateTime -and $_.EndDateTime -lt (Get-Date).AddDays(30)) { "expiring-date" } else { "" }
-            $sSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' style='margin-right:6px' title='Added directly to the Service Principal instead of the App Registration.'>SP Credential</span>" } else { "" }
+            $sSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' onclick=`"addFilter('credentials','sp-creds'); toggleFilterPanel(true); closeDetailModal();`" style='margin-right:6px;cursor:pointer' title='Added directly to the Service Principal instead of the App Registration. Click to filter.'>SP Credential</span>" } else { "" }
             "<tr><td style='padding:4px 8px'>$sSpBadge$sName</td><td style='padding:4px 8px'>$sStart</td><td style='padding:4px 8px' class='$sEndClass'>$sEnd</td><td style='padding:4px 8px'><code>$sKeyId</code></td></tr>"
         }) -join ""
         $secretsModalHtml = "<table id='secretsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('secretsModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('secretsModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('secretsModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('secretsModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$secretRows</tbody></table>"
@@ -2401,7 +2403,7 @@ foreach ($app in $sortedReport) {
             $xStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $xEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $xKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
-            $xSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' style='margin-right:6px' title='Added directly to the Service Principal instead of the App Registration.'>SP Credential</span>" } else { "" }
+            $xSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' onclick=`"addFilter('credentials','sp-creds'); toggleFilterPanel(true); closeDetailModal();`" style='margin-right:6px;cursor:pointer' title='Added directly to the Service Principal instead of the App Registration. Click to filter.'>SP Credential</span>" } else { "" }
             "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xSpBadge$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expiring-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
         }) -join ""
         $expiringModalHtml = "<table id='expiringModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('expiringModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('expiringModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('expiringModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('expiringModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('expiringModalTable',4,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$expiringRows</tbody></table>"
@@ -2417,7 +2419,7 @@ foreach ($app in $sortedReport) {
             $xStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $xEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $xKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
-            $xSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' style='margin-right:6px' title='Added directly to the Service Principal instead of the App Registration.'>SP Credential</span>" } else { "" }
+            $xSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' onclick=`"addFilter('credentials','sp-creds'); toggleFilterPanel(true); closeDetailModal();`" style='margin-right:6px;cursor:pointer' title='Added directly to the Service Principal instead of the App Registration. Click to filter.'>SP Credential</span>" } else { "" }
             "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xSpBadge$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expired-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
         }) -join ""
         $expiredModalHtml = "<table id='expiredModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('expiredModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('expiredModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('expiredModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('expiredModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('expiredModalTable',4,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$expiredRows</tbody></table>"
@@ -2479,7 +2481,7 @@ foreach ($app in $sortedReport) {
     }
     $modalDataEntries.Add("`"$safeKey`": { appPermsTitle: $(ConvertTo-Json $appPermsModalTitle -Compress), appPermsHtml: $(ConvertTo-Json $appPermItems -Compress), delegatedPermsTitle: $(ConvertTo-Json $delegatedPermsModalTitle -Compress), delegatedPermsHtml: $(ConvertTo-Json $delegatedPermItems -Compress), rolePermsTitle: $(ConvertTo-Json $rolePermsModalTitle -Compress), rolePermsHtml: $(ConvertTo-Json $rolePermItems -Compress), riskTitle: $(ConvertTo-Json $riskModalTitle -Compress), riskHtml: $(ConvertTo-Json $riskFactorsHtml -Compress), certsTitle: $(ConvertTo-Json $certsModalTitle -Compress), certsHtml: $(ConvertTo-Json $certsModalHtml -Compress), secretsTitle: $(ConvertTo-Json $secretsModalTitle -Compress), secretsHtml: $(ConvertTo-Json $secretsModalHtml -Compress), expiringTitle: $(ConvertTo-Json $expiringModalTitle -Compress), expiringHtml: $(ConvertTo-Json $expiringModalHtml -Compress), expiredTitle: $(ConvertTo-Json $expiredModalTitle -Compress), expiredHtml: $(ConvertTo-Json $expiredModalHtml -Compress), ownershipTitle: $(ConvertTo-Json $ownershipModalTitle -Compress), ownershipHtml: $(ConvertTo-Json $ownershipModalHtml -Compress), ownersTitle: $(ConvertTo-Json $ownersModalTitle -Compress), ownersHtml: $(ConvertTo-Json $ownersModalHtml -Compress), ownershipGapTitle: $(ConvertTo-Json $ownershipGapModalTitle -Compress), ownershipGapHtml: $(ConvertTo-Json $ownershipGapModalHtml -Compress) }")
     $html += @"
-            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hasadminconsent="$(if ($hasAdminConsentDelegated) { 'yes' } else { 'no' })" data-hasuserconsent="$(if ($hasUserConsentDelegated) { 'yes' } else { 'no' })" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-expired="$expiredValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
+            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hasspcreds="$(if ($app.HasServicePrincipalCredentials) { 'yes' } else { 'no' })" data-hasadminconsent="$(if ($hasAdminConsentDelegated) { 'yes' } else { 'no' })" data-hasuserconsent="$(if ($hasUserConsentDelegated) { 'yes' } else { 'no' })" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-expired="$expiredValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
                 <td><a class="app-name" href="$portalUrl" target="_blank" title="Open in Entra portal">$safeDisplayName</a></td>
                 <td class="$enabledClass">$enabledText</td>
                 <td><code class="mono">$($app.AppId)</code></td>
@@ -2519,7 +2521,7 @@ $html += @"
             yes: 'Yes', no: 'No',
             required: 'Required', 'not-required': 'Open Access',
             has: 'Has Owners', noowners: 'No Owners', gap: 'Ownership Gap',
-            application: 'Application', delegated: 'Delegated', roles: 'Roles', none: 'None',
+            application: 'Application', delegated: 'Delegated', roles: 'Roles', 'sp-creds': 'Has SP Credentials', none: 'None',
             certs: 'Has Certs', secrets: 'Has Secrets', expiring: 'Expiring', expired: 'Expired',
             verified: 'Verified', unverified: 'Unverified',
             admin: 'Admin Consent', user: 'User Consent'
@@ -2543,6 +2545,7 @@ $html += @"
                 case 'credentials':
                     if (value === 'certs')    return row.dataset.hascerts === 'yes';
                     if (value === 'secrets')  return row.dataset.hassecrets === 'yes';
+                    if (value === 'sp-creds') return row.dataset.hasspcreds === 'yes';
                     if (value === 'expiring') return row.dataset.expiring === 'yes';
                     if (value === 'expired')  return row.dataset.expired  === 'yes';
                     return false;
