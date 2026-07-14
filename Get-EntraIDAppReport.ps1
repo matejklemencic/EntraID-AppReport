@@ -591,12 +591,14 @@ function Get-RiskScore {
         }
     }
 
-    # Informational only (0 pts, always shown when applicable, independent of the Yes/No value
-    # above). Application permissions and Directory Roles are already scored on their own merits
-    # earlier in this function; this factor exists purely to prevent reviewers from mistaking
-    # "Assignment Required = Yes" for a mitigating control over that exposure. Flagged with
+    # Informational only (0 pts). Application permissions and Directory Roles are already scored
+    # on their own merits earlier in this function; this factor exists purely to prevent reviewers
+    # from mistaking "Assignment Required = Yes" for a mitigating control over that exposure — so
+    # it only applies when Assignment Required is actually Yes (same condition as the table's
+    # "Partial Mitigation" badge). When Assignment Required is No, the separate "open access" factor
+    # above already conveys unrestricted exposure, so this note would be redundant. Flagged with
     # IsBanner so the HTML renderer routes it to a standalone banner instead of the scored list.
-    if ($hasApplicationPerms -or $uniqueRoles.Count -gt 0) {
+    if ($AssignmentRequired -and ($hasApplicationPerms -or $uniqueRoles.Count -gt 0)) {
         $riskFactors += [PSCustomObject]@{ Text = "Assignment Required doesn't restrict Application permissions or Directory Roles. Those work via the app registration's certificates, secrets, or federated credentials."; Points = 0; IsBanner = $true; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals" }
     }
 
@@ -2067,7 +2069,7 @@ foreach ($app in $sortedReport) {
     # Determine assignment requirement
     $assignmentRequiredText = if ($app.AssignmentRequired) { "<span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Restricts interactive sign-in only. Application permissions and Directory Roles still work via client credentials.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='Any user can sign in interactively. Application permissions and Directory Roles are unaffected either way.'>No</span>" }
     if ($app.AssignmentRequired -and ($app.ApplicationPermissions -gt 0 -or $app.DirectoryRoles -gt 0)) {
-        $assignmentRequiredText += "<div style='margin-top:4px'><span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].riskTitle,reportDetails['$($app.AppId)'].riskHtml)`" style='cursor:pointer' title='Assignment Required doesn&#39;t restrict Application permissions or Directory Roles, those work via Application registration certificates, secrets and federated credentials. Click to view details.'>Not Mitigated</span></div>"
+        $assignmentRequiredText += "<div style='margin-top:4px'><span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].riskTitle,reportDetails['$($app.AppId)'].riskHtml)`" style='cursor:pointer' title='Assignment Required doesn&#39;t restrict Application permissions or Directory Roles, those work via Application registration certificates, secrets and federated credentials. Click to view details.'>Partial Mitigation</span></div>"
     }
     $assignmentRequiredClass = if ($app.AssignmentRequired) { "assignment-required" } else { "assignment-not-required" }
     
