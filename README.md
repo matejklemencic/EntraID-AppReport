@@ -104,10 +104,11 @@ For **interactive (user) runs**, these are requested as delegated scopes during 
 | `-OutputPath` | String | Auto-generated | Path for the HTML report. Defaults to `EntraIDAppReport__{TenantName}_{Date}.html` in the current directory. |
 | `-TenantId` | String | None | Entra ID tenant ID. Required for Service Principal authentication. Used when targeting a specific tenant. |
 | `-AccessToken` | SecureString | None | Pre-acquired Microsoft Graph token. Used in Azure DevOps pipelines via `Get-AzAccessToken`. |
-| `-ClientId` | String | None | App (client) ID for Service Principal authentication. Must be combined with `-CertificateThumbprint` and `-TenantId`. |
-| `-CertificateThumbprint` | String | None | Certificate thumbprint for Service Principal authentication. |
-| `-UseManagedIdentity` | Switch | None | Authenticate using the Managed Identity of the hosting environment (Azure VM, Function, DevOps hosted agent). |
+| `-ClientId` | String | None | App (client) ID for Service Principal authentication. Must be combined with `-CertificateThumbprint` and `-TenantId`, or with `-UseManagedIdentity` to select a user-assigned Managed Identity. Supplying it with neither is a validation error. |
+| `-CertificateThumbprint` | String | None | Certificate thumbprint for Service Principal authentication. Requires `-ClientId`. |
+| `-UseManagedIdentity` | Switch | None | Authenticate using the Managed Identity of the hosting environment (Azure VM, Function, DevOps hosted agent). System-assigned by default; add `-ClientId` for a user-assigned identity. |
 | `-NonInteractive` | Switch | None | Suppress all prompts and skip automatic browser launch. Required for unattended or pipeline runs. |
+| `-TargetAppId` | String | None | Scan a single Enterprise Application instead of the whole tenant. Accepts either the Application (client) ID or the Service Principal object ID. Skips full tenant enumeration and the confirmation prompt. Cannot be combined with `-OnlyWithPermissions`, `-MinimumPermissions`, `-OnlyWithAppRegistrations`, or `-OnlyServicePrincipals`. |
 | `-OnlyWithPermissions` | Switch | None | Include only apps that have at least one permission (delegated, application, or directory role). |
 | `-MinimumPermissions` | Int | `0` | Include only apps with a total permission count at or above this threshold. |
 | `-RiskConfigPath` | String | None | Path to a JSON file that overrides the built-in risk scoring rules. See [Custom risk configuration](#custom-risk-configuration). |
@@ -151,7 +152,11 @@ The certificate must be installed in the current user's or local machine's certi
 ### Managed Identity
 
 ```powershell
+# System-assigned Managed Identity
 .\Get-EntraIDAppReport.ps1 -UseManagedIdentity -NonInteractive -OutputPath ".\report.html"
+
+# User-assigned Managed Identity (select by its client ID)
+.\Get-EntraIDAppReport.ps1 -UseManagedIdentity -ClientId "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy" -NonInteractive -OutputPath ".\report.html"
 ```
 
 ### Filter to high-signal apps only
@@ -165,6 +170,13 @@ The certificate must be installed in the current user's or local machine's certi
 
 # Only apps that have an App Registration in this tenant
 .\Get-EntraIDAppReport.ps1 -OnlyWithAppRegistrations
+```
+
+### Scan a single application
+
+```powershell
+# By Application (client) ID or Service Principal object ID
+.\Get-EntraIDAppReport.ps1 -TargetAppId "11111111-2222-3333-4444-555555555555"
 ```
 
 ### Dry run (validate auth without writing a file)
@@ -193,6 +205,7 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 | High-value app open to all users (assignment not required) — Azure CLI, Azure/Azure AD PowerShell, Exchange PowerShell, Graph CLI/PowerShell | +50 |
 | Each unique high-risk directory role (e.g. Global Administrator, Security Administrator) | +15 |
 | Each unique high-risk permission (e.g. `Directory.ReadWrite.All`, `Directory.Read.All`, `User.ReadWrite.All`) | +15 |
+| Credential added directly to the Service Principal instead of the App Registration | +10 |
 | Each unique medium-risk permission (e.g. `User.Read.All`, `Mail.Send`) | +5 |
 | Each other directory role | +5 |
 | Has any application permissions (bonus, counted once) | +5 |
@@ -203,18 +216,15 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 | Long-lived credentials (expiry > 1 year) | +5 |
 | External application (registered in another tenant, not Microsoft) | +5 |
 | External application without a Microsoft-verified publisher | +5 |
-| No owners on either Service Principal or App Registration | +4 |
 | Sensitive permission granted via User Consent, no admin review (governance blind spot) — flat, regardless of how many users consented | +3 |
-| No Service Principal owners (App Registration owners only) | +2 |
-| No App Registration owners (Service Principal owners only) | +2 |
 | Suspicious keyword in display name (e.g. `test`, `admin`, `temp`, `legacy`) | +2 |
-| Ownership gap (SP and App Reg owner sets differ) | +1 |
 
 Notes:
 
 - The high-value factor (+50) and the generic "assignment not required" factor (+5) are mutually exclusive — a high-value app records only the single higher factor.
 - An external, unverified third-party app accumulates both the external (+5) and unverified-publisher (+5) factors.
 - The Admin Consent (+5) and User Consent (+3) factors are independent and can both apply to the same app if it has some permissions consented tenant-wide and others consented individually by users.
+- Ownership state (no owners, owners on only one side, ownership gaps) is surfaced in the report via the Owners column, badges, and filters, but is intentionally **not** scored — missing or mismatched ownership is treated as a governance signal, not a security risk factor.
 - Disabled apps keep their full inherent score and are not counted differently in scoring — the disabled state is shown only as a modal banner and muted color, not as a scoring factor. See [Disabled app handling](#disabled-app-handling).
 
 ### High-value target apps
@@ -230,7 +240,6 @@ The list is defined in the script as `$script:HighValueTargetApps` and can be ex
 | Azure Active Directory PowerShell | `1b730954-1685-4b74-9bfd-dac224a7b894` |
 | Exchange Online PowerShell | `fb78d390-0c51-40cd-8e17-fdbfab77341b` |
 | Microsoft Graph Command Line Tools | `14d82eec-204b-4c2f-b7e8-296a70dab67e` |
-| Microsoft Graph PowerShell | `09abbdfd-ed23-44ee-a2d9-a627aa1c90f3` |
 
 ### Disabled app handling
 
@@ -326,8 +335,10 @@ To change the schedule, update the `cron` expression. To disable the schedule an
 The artifact `EntraIDAppReport` contains:
 
 ```
-EntraIDAppReport__{TenantName}_YYYY-MM-DD.html
+EntraIDAppReport_YYYY-MM-DD.html
 ```
+
+(The pipeline passes an explicit `-OutputPath`, so the tenant-name default naming does not apply here.)
 
 Download the artifact from the pipeline run, open the HTML file in any browser. No internet connection is required.
 

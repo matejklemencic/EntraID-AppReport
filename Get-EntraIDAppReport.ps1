@@ -28,12 +28,14 @@
     Obtain with: ConvertTo-SecureString (Get-AzAccessToken -ResourceTypeName MSGraph).Token -AsPlainText -Force
 .PARAMETER ClientId
     Optional. The Application (client) ID of a Service Principal for unattended/pipeline authentication.
-    Must be combined with either -ClientSecret or -CertificateThumbprint and -TenantId.
+    Must be combined with -CertificateThumbprint and -TenantId. Alternatively, combine with
+    -UseManagedIdentity to select a user-assigned Managed Identity by its client ID.
 .PARAMETER CertificateThumbprint
     Optional. Certificate thumbprint for Service Principal authentication. Use with -ClientId and -TenantId.
 .PARAMETER UseManagedIdentity
     Optional. Use the Azure Managed Identity of the hosting environment (e.g. Azure DevOps hosted agent,
-    Azure VM, Azure Function). No credentials required.
+    Azure VM, Azure Function). No credentials required. Uses the system-assigned identity by default;
+    combine with -ClientId to select a user-assigned Managed Identity.
 .PARAMETER NonInteractive
     Optional. Suppress all interactive prompts. Required for unattended/pipeline runs.
     Also suppresses automatic browser launch after report generation.
@@ -124,7 +126,15 @@ if ($TargetAppId -and ($OnlyWithPermissions -or $MinimumPermissions -gt 0 -or $O
     Write-Error "-TargetAppId cannot be combined with -OnlyWithPermissions, -MinimumPermissions, -OnlyWithAppRegistrations or -OnlyServicePrincipals."
     exit 1
 }
-if (($ClientId -or $CertificateThumbprint) -and -not $TenantId) {
+if ($CertificateThumbprint -and -not $ClientId) {
+    Write-Error "-CertificateThumbprint requires -ClientId (Service Principal authentication)."
+    exit 1
+}
+if ($ClientId -and -not $CertificateThumbprint -and -not $UseManagedIdentity) {
+    Write-Error "-ClientId requires either -CertificateThumbprint (Service Principal authentication) or -UseManagedIdentity (user-assigned Managed Identity)."
+    exit 1
+}
+if ($ClientId -and $CertificateThumbprint -and -not $TenantId) {
     Write-Error "-TenantId is required when using Service Principal authentication (-ClientId/-CertificateThumbprint)."
     exit 1
 }
@@ -291,6 +301,26 @@ function Get-EntraRoleLearnUrl {
     return "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#$anchor"
 }
 
+# App Registration lookup cache — both the owners and the credentials paths need the
+# application object, so fetch it once per AppId with a superset of the properties either
+# needs. $null is cached too, meaning "no App Registration exists in this tenant".
+$script:appRegistrationCache = @{}
+function Get-AppRegistrationCached {
+    param([string]$AppId)
+    if ($script:appRegistrationCache.ContainsKey($AppId)) {
+        return $script:appRegistrationCache[$AppId]
+    }
+    $app = $null
+    try {
+        $app = Get-MgApplication -Filter "appId eq '$AppId'" -Property 'Id,PasswordCredentials,KeyCredentials' -ErrorAction SilentlyContinue
+    }
+    catch {
+        Write-Verbose "Could not retrieve App Registration for AppId '$AppId': $($_.Exception.Message)"
+    }
+    $script:appRegistrationCache[$AppId] = $app
+    return $app
+}
+
 # Enhanced function to get both Service Principal and App Registration owners
 function Get-ServicePrincipalOwners {
     param(
@@ -362,7 +392,7 @@ function Get-ServicePrincipalOwners {
 
     # Get App Registration owners (if an App Registration exists in this tenant)
     try {
-        $app = Get-MgApplication -Filter "appId eq '$AppId'" -Property 'id' -ErrorAction SilentlyContinue
+        $app = Get-AppRegistrationCached -AppId $AppId
         if ($app) {
             $appOwners = Get-MgApplicationOwner -ApplicationId $app.Id -All `
                 -Property 'id,displayName,userPrincipalName,appId' -ErrorAction SilentlyContinue
@@ -512,7 +542,7 @@ function Get-RiskScore {
     }
 
     # Ungoverned consent: at least one sensitive delegated permission was granted via individual
-    # User Consent (no admin review). Flat +2, deliberately independent of consent count — one
+    # User Consent (no admin review). Flat +3, deliberately independent of consent count — one
     # ungoverned user grant is already a full exposure regardless of how many others exist.
     if ($hasUngovernedConsent) {
         $score += 3
@@ -601,8 +631,8 @@ function Get-RiskScore {
     # Calibration reference points:
     #   Assignment not required + external app (5+5) → Low
     #   One medium-risk perm + app-type + open access + secrets (5+5+5+5) → Medium
-    #   Two high-risk perms + app-type + open access + secrets + long-lived (20+5+5+5+5) → High
-    #   Two high-risk perms + app-type + high-value open access + secrets + long-lived (20+5+15+5+5) → Critical
+    #   One high-risk perm + app-type + open access + secrets + long-lived (15+5+5+5+5 = 35) → High
+    #   Two high-risk perms + app-type + open access + secrets + long-lived (30+5+5+5+5 = 50) → Critical
     return @{
         Score  = $score
         Level  = if ($score -ge 50) { "Critical" } elseif ($score -ge 35) { "High" } elseif ($score -ge 15) { "Medium" } else { "Low" }
@@ -640,7 +670,7 @@ function Get-ApplicationCredentials {
     $appExpiredCerts   = @()
 
     try {
-        $app = Get-MgApplication -Filter "appId eq '$AppId'" -Property "Id,PasswordCredentials,KeyCredentials" -ErrorAction SilentlyContinue
+        $app = Get-AppRegistrationCached -AppId $AppId
         if ($app) {
             $hasAppReg = $true
             $appRegId = $app.Id
@@ -779,9 +809,15 @@ try {
         Write-Host "  Auth method: Service Principal (certificate)" -ForegroundColor Cyan
         Connect-MgGraph -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
     } elseif ($UseManagedIdentity) {
-        # Managed Identity — for Azure DevOps / Azure-hosted agents
-        Write-Host "  Auth method: Managed Identity" -ForegroundColor Cyan
-        Connect-MgGraph -Identity -NoWelcome -ErrorAction Stop
+        # Managed Identity — for Azure DevOps / Azure-hosted agents.
+        # -ClientId selects a user-assigned Managed Identity; omit it for the system-assigned one.
+        if ($ClientId) {
+            Write-Host "  Auth method: Managed Identity (user-assigned)" -ForegroundColor Cyan
+            Connect-MgGraph -Identity -ClientId $ClientId -NoWelcome -ErrorAction Stop
+        } else {
+            Write-Host "  Auth method: Managed Identity" -ForegroundColor Cyan
+            Connect-MgGraph -Identity -NoWelcome -ErrorAction Stop
+        }
     } elseif ($TenantId) {
         Connect-MgGraph -Scopes $scopes -TenantId $TenantId -NoWelcome -ErrorAction Stop
     } else {
@@ -836,8 +872,8 @@ if ($TargetAppId) {
             "d3590ed6-52b3-4102-aeff-aad2292ab01c", # Microsoft Office
             "797f4846-ba00-4fd7-ba43-dac1f8f63013"  # Windows Azure Service Management API
             # NOTE: Azure PowerShell (1950a258...), Azure AD PowerShell (1b730954...) and Microsoft Graph
-            # PowerShell (09abbdfd...) are intentionally NOT excluded so they can be surfaced and
-            # risk-scored as high-value target apps.
+            # Command Line Tools (14d82eec...) are intentionally NOT excluded so they can be surfaced
+            # and risk-scored as high-value target apps.
         ) -and
         ($_.Tags -contains "WindowsAzureActiveDirectoryIntegratedApp" -or
          $_.AppOwnerOrganizationId -eq $currentTenantId -or
@@ -1208,13 +1244,9 @@ $appsWithoutOwners = @($report | Where-Object { $_.HasOwners -eq $false }).Count
 $appsWithOpenAccess = @($report | Where-Object { $_.AssignmentRequired -eq $false }).Count
 $appsWithOwnershipGaps = @($report | Where-Object { $_.OwnershipGap -eq $true }).Count
 $disabledApps = @($report | Where-Object { $_.IsEnabled -eq $false }).Count
-$appsWithSPOwnersOnly = @($report | Where-Object { $_.HasServicePrincipalOwners -eq $true -and $_.HasAppRegistrationOwners -eq $false -and $_.HasAppRegistration -eq $true }).Count
-$appsWithAppRegOwnersOnly = @($report | Where-Object { $_.HasServicePrincipalOwners -eq $false -and $_.HasAppRegistrationOwners -eq $true }).Count
 
 # Generate simplified HTML report
 
-# Enterprise Applications logo — inlined so the script has no external file dependency
-$logoSvg = '<svg id="a760b6f1-1e55-4349-bcad-563b81ab52cb" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><defs><linearGradient id="b715ec20-95db-414c-982b-71456fb0c9ab" x1="-6784.85" y1="1118.78" x2="-6784.85" y2="1089.98" gradientTransform="matrix(0.5, 0, 0, -0.5, 3400.41, 559.99)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5ea0ef" /><stop offset="0.18" stop-color="#589eed" /><stop offset="0.41" stop-color="#4897e9" /><stop offset="0.66" stop-color="#2e8ce1" /><stop offset="0.94" stop-color="#0a7cd7" /><stop offset="1" stop-color="#0078d4" /></linearGradient><linearGradient id="f7e46209-f134-49aa-a850-2e9a1b04fba6" x1="-1.47" y1="14.91" x2="17.16" y2="14.8" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#449cdd" stop-opacity="0.15" /><stop offset="0.16" stop-color="#2870ab" stop-opacity="0" /><stop offset="0.18" stop-color="#2469a3" stop-opacity="0.06" /><stop offset="0.23" stop-color="#1a5991" stop-opacity="0.19" /><stop offset="0.28" stop-color="#144f86" stop-opacity="0.27" /><stop offset="0.34" stop-color="#124c82" stop-opacity="0.3" /><stop offset="0.76" stop-color="#002851" stop-opacity="0.35" /><stop offset="0.9" stop-color="#2f7ab6" stop-opacity="0" /><stop offset="1" stop-color="#449cdd" stop-opacity="0" /></linearGradient><clipPath id="b36c7b72-34c8-47c6-ac8b-a96783f174f2"><circle cx="13.26" cy="13.27" r="4.16" fill="none" /></clipPath></defs><title>Icon-identity-225</title><path d="M5.61,10.65H9.94V15H5.61Zm-5-5.76H4.89V.57H1.17a.6.6,0,0,0-.6.6ZM1.17,15H4.89V10.65H.57v3.72A.6.6,0,0,0,1.17,15Zm-.6-5H4.89V5.61H.57Zm10.09,5h3.72a.6.6,0,0,0,.6-.6V10.65H10.66Zm-5-5H9.94V5.61H5.61Zm5.05,0H15V5.61H10.66Zm0-9.36V4.89H15V1.17a.6.6,0,0,0-.6-.6Zm-5,4.32H9.94V.57H5.61Z" fill="url(#b715ec20-95db-414c-982b-71456fb0c9ab)" /><path d="M10.66,15h4.15a.59.59,0,0,1-.18-.29h-4Z" opacity="0.95" fill="url(#f7e46209-f134-49aa-a850-2e9a1b04fba6)" /><circle cx="13.26" cy="13.27" r="4.16" fill="#32bedd" /><g clip-path="url(#b36c7b72-34c8-47c6-ac8b-a96783f174f2)"><path d="M17.06,13.87c-.21.11-.51.05-.65.16a1.6,1.6,0,0,0-.63.66c0,.06,0,.15-.07.18-.28.19-.56.39-.3.81-.3,0-.2-.27-.34-.35a.77.77,0,0,0-1.06.54.34.34,0,0,0,.16.37.26.26,0,0,0,.36-.12.18.18,0,0,1,.26-.06c0,.16-.28.45.18.46.12,0,.09.14.06.23s.06.24.19.3,0,0,0,.05,0,0,0,0c-.37,0-.45-.45-.81-.5a4.28,4.28,0,0,1-.43-.14c-.27-.09-.58-.14-.64-.54a.77.77,0,0,0-.36-.49c-.12-.08-.19-.23-.31-.32a1,1,0,0,0-.22-.36.94.94,0,0,1-.14-.87,2.32,2.32,0,0,0-.1-1.68c-.1-.32-.12-.65-.48-.86s-.3.12-.44.05-.22.13-.26.15c-.29.08-.54.33-.91.29.14-.07.25-.11.35-.17s.29-.14.07-.38-.14-.59.45-.83c-.05-.14-.41-.11-.25-.37s.28-.13.43,0c.1-.19-.12-.43.05-.54a2.86,2.86,0,0,1,.72-.29.25.25,0,0,1,.34.11c.18.28.54.33.72.61.05.09.15,0,.22,0,.41-.14.68.12,1,.33s.27.34.53.31a.49.49,0,0,1,.21,0c.16.07.31.11.43-.06a.3.3,0,0,0,.26-.23c.06-.09.09-.22.24-.16A1.15,1.15,0,0,0,16,11c.13-.1.26-.16.11-.39a.37.37,0,0,1,.25-.56.54.54,0,0,1,.63.23c.19.34.25.73.47,1,.07.09,0,.13,0,.2s-.18,0-.28-.06l.07.43a.66.66,0,0,1-.82-.25c0-.12,0-.17.12-.23s.19-.11.19-.24a.19.19,0,0,0-.1-.2c-.08,0-.13,0-.15.09s-.33.25-.28.53-.19.22-.33.14c-.33-.17-.45.13-.59.29s0,.34.16.46.31.21.37.4a.88.88,0,0,0,.29-.58c0-.18.07-.43.32-.46a.43.43,0,0,1,.44.28c.05.11.13.12.23.13a8.79,8.79,0,0,1,.54,1.52l-.37-.05c0-.29-.25-.16-.39-.22C16.84,13.64,17.07,13.69,17.06,13.87Z" fill="#b4ec36" /><path d="M15.62,10.27c-.13-.12-.27-.23-.06-.4s.2-.29.3,0A.37.37,0,0,1,15.62,10.27Z" fill="#b4ec36" /><path d="M15.93,9.87c.11-.11.25-.1.27,0s-.13.19-.26.23S15.85,10,15.93,9.87Z" fill="#b4ec36" /><path d="M15.16,8.94,14.81,9c0-.25.25-.27.42-.23S15.21,8.89,15.16,8.94Z" fill="#b4ec36" /></g></svg>'
 
 $html = @"
 <!DOCTYPE html>
@@ -2038,7 +2070,9 @@ foreach ($app in $sortedReport) {
         $safePermName = ConvertTo-HtmlSafe $perm.Permission
         $safeResource = ConvertTo-HtmlSafe $perm.Resource
         if ($perm.Type -ne "Directory Role") {
-            $urlPermName = [Uri]::EscapeDataString($perm.Permission)
+            # HTML-encode after URL-encoding: on Windows PowerShell 5.1 EscapeDataString leaves
+            # apostrophes unescaped, which would break out of the single-quoted href attribute.
+            $urlPermName = ConvertTo-HtmlSafe ([Uri]::EscapeDataString($perm.Permission))
             $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPermName' target='_blank' title='View $safePermName on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
         } else {
             $roleLearnUrl = Get-EntraRoleLearnUrl $perm.Permission
@@ -2052,7 +2086,7 @@ foreach ($app in $sortedReport) {
         $group = $delegatedGroups[$groupKey]
         $safePermName = ConvertTo-HtmlSafe $group.Permission
         $safeResource = ConvertTo-HtmlSafe $group.Resource
-        $urlPermName = [Uri]::EscapeDataString($group.Permission)
+        $urlPermName = ConvertTo-HtmlSafe ([Uri]::EscapeDataString($group.Permission))
         $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPermName' target='_blank' title='View $safePermName on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
         if ($group.HasAdminConsent) {
             $consentBadge = "<span class='badge orange' onclick=`"addFilter('consent','admin'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-right:6px' title='Tenant-wide grant, reviewed and approved by an administrator. Click to filter.'>Admin Consent</span>"
@@ -2148,7 +2182,7 @@ foreach ($app in $sortedReport) {
             # Linkify the permission name to the Graph Permissions Explorer (same as the permission modals)
             if ($_.Permission) {
                 $safePerm = ConvertTo-HtmlSafe $_.Permission
-                $urlPerm  = [Uri]::EscapeDataString($_.Permission)
+                $urlPerm  = ConvertTo-HtmlSafe ([Uri]::EscapeDataString($_.Permission))
                 $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPerm' target='_blank' title='View $safePerm on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePerm</a>"
                 $factorText = $factorText.Replace($safePerm, $permLink)
             }
@@ -2605,7 +2639,13 @@ $html += @"
             const visibleRows = Array.from(document.querySelectorAll('#reportTable tbody tr'))
                 .filter(tr => tr.style.display !== 'none');
 
-            const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
+            // Neutralize leading formula characters so a hostile value (e.g. an app display
+            // name starting with '=') cannot execute as a formula when opened in Excel.
+            const esc = v => {
+                let s = String(v);
+                if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+                return '"' + s.replace(/"/g, '""') + '"';
+            };
 
             const lines = [headers.map(esc).join(';')];
             visibleRows.forEach(tr => {
