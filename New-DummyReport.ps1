@@ -138,7 +138,8 @@ $report = @(
         RiskLevel = "Critical"
         RiskFactors = @(
             [PSCustomObject]@{ Text = "High-risk permission: Directory.ReadWrite.All"; Points = 15; Permission = "Directory.ReadWrite.All" },
-            [PSCustomObject]@{ Text = "Assignment not required"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" },
+            [PSCustomObject]@{ Text = "Assignment not required, open to all users"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" },
+            [PSCustomObject]@{ Text = "Assignment Required doesn't restrict Application permissions or Directory Roles, those work via client credentials"; Points = 0; IsBanner = $true; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals" },
             [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5; Detail = "Microsoft recommends that you use a certificate instead of a client secret before moving the application to a production environment." },
             [PSCustomObject]@{ Text = "Multiple secrets configured (2) - reduces auditability"; Points = 5 },
             [PSCustomObject]@{ Text = "Ownership gap - owners differ between Service Principal and App Registration"; Points = 1 }
@@ -225,7 +226,8 @@ $report = @(
         RiskFactors = @(
             [PSCustomObject]@{ Text = "High-risk directory role: Application Administrator"; Points = 15; Role = "Application Administrator" },
             [PSCustomObject]@{ Text = "Has application permissions"; Points = 5 },
-            [PSCustomObject]@{ Text = "External application registered in another tenant"; Points = 5 }
+            [PSCustomObject]@{ Text = "External application registered in another tenant"; Points = 5 },
+            [PSCustomObject]@{ Text = "Assignment Required doesn't restrict Application permissions or Directory Roles, those work via client credentials"; Points = 0; IsBanner = $true; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals" }
         )
     }
 
@@ -353,7 +355,8 @@ $report = @(
             [PSCustomObject]@{ Text = "Has application permissions"; Points = 5 },
             [PSCustomObject]@{ Text = "No owners assigned (neither Service Principal nor App Registration)"; Points = 4 },
             [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5; Detail = "Microsoft recommends that you use a certificate instead of a client secret before moving the application to a production environment." },
-            [PSCustomObject]@{ Text = "Long-lived credentials (expiry > 1 year)"; Points = 5 }
+            [PSCustomObject]@{ Text = "Long-lived credentials (expiry > 1 year)"; Points = 5 },
+            [PSCustomObject]@{ Text = "Assignment Required doesn't restrict Application permissions or Directory Roles, those work via client credentials"; Points = 0; IsBanner = $true; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals" }
         )
     }
 
@@ -443,6 +446,64 @@ $report = @(
         )
     }
 
+    # 8b) Assignment Required = Yes, but still Critical: Application permissions + Directory Roles
+    # are unaffected by the assignment toggle (client credential flow bypasses it entirely). This
+    # demonstrates the amber "Not Mitigated" badge and its accompanying 0-pt risk factor annotation.
+    [PSCustomObject]@{
+        DisplayName = "OneIdentity Manager Sync"
+        AppId = "08080808-0000-0000-0000-000000000008"
+        ServicePrincipalId = "sp-0000-0000-0000-000000000008b"
+        AppOwnerOrganizationId = $tenantId
+        HasAppRegistration = $true
+        Owners = @(
+            (New-Owner "Grace Governance" "grace@contoso.com" "User" "Both")
+        )
+        ServicePrincipalOwners = @('Grace Governance')
+        AppRegistrationOwners  = @('Grace Governance')
+        HasOwners = $true
+        HasServicePrincipalOwners = $true
+        HasAppRegistrationOwners  = $true
+        OwnershipGap = $false
+        AssignmentRequired = $true
+        IsEnabled = $true
+        IsVerifiedPublisher = $false
+        VerifiedPublisherName = ""
+        TotalPermissions = 16
+        ApplicationPermissions = 14
+        DelegatedPermissions = 0
+        DirectoryRoles = 2
+        Permissions = @(
+            (New-Perm "Application" "User.ReadWrite.All"       "Microsoft Graph"),
+            (New-Perm "Application" "Group.ReadWrite.All"      "Microsoft Graph"),
+            (New-Perm "Application" "Directory.ReadWrite.All"  "Microsoft Graph"),
+            (New-Perm "Application" "Application.ReadWrite.All" "Microsoft Graph"),
+            (New-Perm "Directory Role" "User Administrator"        "Entra ID"),
+            (New-Perm "Directory Role" "Groups Administrator"      "Entra ID")
+        )
+        HasActiveCredentials = $true
+        ActiveCertificates = 0
+        ActiveSecrets = 1
+        ExpiringCredentials = 0
+        ExpiredCredentials = 0
+        ActiveCertificateList = @()
+        ActiveSecretList = @(
+            (New-Cred "Sync Service Secret" -60 300 "key-8081")
+        )
+        RiskScore = 65
+        RiskLevel = "Critical"
+        RiskFactors = @(
+            [PSCustomObject]@{ Text = "High-risk permission: User.ReadWrite.All"; Points = 15; Permission = "User.ReadWrite.All" },
+            [PSCustomObject]@{ Text = "High-risk permission: Group.ReadWrite.All"; Points = 15; Permission = "Group.ReadWrite.All" },
+            [PSCustomObject]@{ Text = "High-risk permission: Directory.ReadWrite.All"; Points = 15; Permission = "Directory.ReadWrite.All" },
+            [PSCustomObject]@{ Text = "High-risk permission: Application.ReadWrite.All"; Points = 15; Permission = "Application.ReadWrite.All" },
+            [PSCustomObject]@{ Text = "Has application permissions"; Points = 5 },
+            [PSCustomObject]@{ Text = "High-risk directory role: User Administrator"; Points = 15; Role = "User Administrator" },
+            [PSCustomObject]@{ Text = "Directory role: Groups Administrator"; Points = 5; Role = "Groups Administrator" },
+            [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5; Detail = "Microsoft recommends that you use a certificate instead of a client secret before moving the application to a production environment." },
+            [PSCustomObject]@{ Text = "Assignment Required doesn't restrict Application permissions or Directory Roles, those work via client credentials"; Points = 0; IsBanner = $true; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals" }
+        )
+    }
+
     # 9) Kitchen Sink: every distinct risk factor text/hint in a single app, for review purposes.
     # NOTE: Some factors are mutually exclusive in the real Get-RiskScore engine (e.g. ownership
     # variants, or the two "Assignment not required" variants) and could never all fire together
@@ -505,8 +566,9 @@ $report = @(
             [PSCustomObject]@{ Text = "No Service Principal owners (only App Registration owners)"; Points = 2 },
             [PSCustomObject]@{ Text = "No App Registration owners (only Service Principal owners)"; Points = 2 },
             [PSCustomObject]@{ Text = "Ownership gap - owners differ between Service Principal and App Registration"; Points = 1 },
-            [PSCustomObject]@{ Text = "Assignment not required for high-value app"; Points = 50; Detail = "Rarely needed by users and a frequent abuse target. Lock it down with Assignment Required option"; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" },
-            [PSCustomObject]@{ Text = "Assignment not required"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" },
+            [PSCustomObject]@{ Text = "Assignment not required for high-value app, open to all users"; Points = 50; Detail = "High-value first-party tools (Azure CLI, Azure PowerShell, etc.) are frequent phishing and token-theft targets. Restrict via Assignment Required."; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" },
+            [PSCustomObject]@{ Text = "Assignment not required, open to all users"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" },
+            [PSCustomObject]@{ Text = "Assignment Required doesn't restrict Application permissions or Directory Roles, those work via client credentials"; Points = 0; IsBanner = $true; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals" },
             [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5; Detail = "Microsoft recommends that you use a certificate instead of a client secret before moving the application to a production environment." },
             [PSCustomObject]@{ Text = "Multiple secrets configured (3) - reduces auditability"; Points = 5 },
             [PSCustomObject]@{ Text = "Long-lived credentials (expiry > 1 year)"; Points = 5 },

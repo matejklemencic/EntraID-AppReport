@@ -525,19 +525,33 @@ function Get-RiskScore {
         $riskFactors += [PSCustomObject]@{ Text = "Ownership gap - owners differ between Service Principal and App Registration"; Points = 1 }
     }
     
-    # Assignment not required (open access risk).
+    # Assignment not required (open access risk) — this setting governs ONLY the delegated /
+    # interactive sign-in path (who can sign in to the app as themselves). It has NO effect on
+    # Application (client credentials) permissions or Directory Roles held by the service
+    # principal — anyone holding the app's client secret or certificate can authenticate as the
+    # app itself (grant_type=client_credentials) with no user in the flow and no assignment
+    # check performed, regardless of this setting.
     # High-value first-party tooling apps (Azure CLI, Azure/AzureAD PowerShell, Exchange PowerShell,
     # Graph CLI/PowerShell) are prime targets for token theft, illicit consent and lateral movement.
-    # When such an app doesn't require assignment, EVERY user in the tenant can use it — record only the
-    # single highest factor (+30) instead of also adding the generic +4.
+    # When such an app doesn't require assignment, EVERY user in the tenant can sign in as
+    # themselves — record only the single highest factor (+50) instead of also adding the generic +5.
     if (-not $AssignmentRequired) {
         if ($IsHighValueTargetApp) {
             $score += 50
-            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required for high-value app"; Points = 50; Detail = "Rarely needed by users and a frequent abuse target. Lock it down with Assignment Required option"; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" }
+            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required for high-value app, open to all users"; Points = 50; Detail = "High-value first-party tools (Azure CLI, Azure PowerShell, etc.) are frequent phishing and token-theft targets. Restrict via Assignment Required."; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" }
         } else {
             $score += 5
-            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" }
+            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required, open to all users"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" }
         }
+    }
+
+    # Informational only (0 pts, always shown when applicable, independent of the Yes/No value
+    # above). Application permissions and Directory Roles are already scored on their own merits
+    # earlier in this function; this factor exists purely to prevent reviewers from mistaking
+    # "Assignment Required = Yes" for a mitigating control over that exposure. Flagged with
+    # IsBanner so the HTML renderer routes it to a standalone banner instead of the scored list.
+    if ($hasApplicationPerms -or $uniqueRoles.Count -gt 0) {
+        $riskFactors += [PSCustomObject]@{ Text = "Assignment Required doesn't restrict Application permissions or Directory Roles. Those work via the app registration's certificates, secrets, or federated credentials."; Points = 0; IsBanner = $true; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals" }
     }
 
     # Credential type: secrets are less secure than certificates
@@ -1606,6 +1620,13 @@ $html = @"
             background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px;
             padding: 8px 12px; margin: 0 0 14px 0; font-size: 12.5px; color: var(--text-muted);
         }
+        .risk-info-banner {
+            background: rgba(176, 96, 0, 0.08); border: 1px solid #b06000; border-left: 3px solid #b06000;
+            border-radius: 6px; padding: 8px 12px; margin: 0 0 14px 0; font-size: 12.5px; color: var(--text-muted);
+        }
+        [data-theme="dark"] .risk-info-banner {
+            background: rgba(200, 112, 0, 0.14); border-color: #c87000;
+        }
 
         .perm-badges { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 
@@ -1891,7 +1912,10 @@ foreach ($app in $sortedReport) {
     }
     
     # Determine assignment requirement
-    $assignmentRequiredText = if ($app.AssignmentRequired) { "<span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Explicit user or group assignment required to access.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='Any user can access without assignment.'>No</span>" }
+    $assignmentRequiredText = if ($app.AssignmentRequired) { "<span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Restricts interactive sign-in only. Application permissions and Directory Roles still work via client credentials.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='Any user can sign in interactively. Application permissions and Directory Roles are unaffected either way.'>No</span>" }
+    if ($app.AssignmentRequired -and ($app.ApplicationPermissions -gt 0 -or $app.DirectoryRoles -gt 0)) {
+        $assignmentRequiredText += "<div style='margin-top:4px'><span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].riskTitle,reportDetails['$($app.AppId)'].riskHtml)`" style='cursor:pointer' title='Assignment Required doesn&#39;t restrict Application permissions or Directory Roles, those work via Application registration certificates, secrets and federated credentials. Click to view details.'>Not Mitigated</span></div>"
+    }
     $assignmentRequiredClass = if ($app.AssignmentRequired) { "assignment-required" } else { "assignment-not-required" }
     
     # Format owners with enhanced information
@@ -2070,11 +2094,21 @@ foreach ($app in $sortedReport) {
                 "<span class='risk-scale-tick' style='left:100%;transform:translateX(-100%)'>65+</span>" +
             "</div>" +
         "</div>"
-    $riskFactorsHtml = if ($app.RiskFactors.Count -gt 0) {
+    # Split out the banner-flagged informational item (IsBanner = $true) so it renders as a
+    # standalone note above the factor list instead of as a 0-point "—" list entry.
+    $riskScopeNoteFactor = $app.RiskFactors | Where-Object { $_.IsBanner } | Select-Object -First 1
+    $riskScoredFactors   = $app.RiskFactors | Where-Object { -not $_.IsBanner }
+
+    $riskScopeNoteBannerHtml = if ($riskScopeNoteFactor) {
+        $safeScopeNoteText = ConvertTo-HtmlSafe $riskScopeNoteFactor.Text
+        "<div class='risk-info-banner'>$safeScopeNoteText</div>"
+    } else { "" }
+
+    $riskFactorsHtml = if ($riskScoredFactors.Count -gt 0) {
         # Stable sort: descending by points, preserving original order within equal points.
         # (Windows PowerShell 5.1 Sort-Object is not stable, so use an index tiebreaker.)
         $factorIndex = 0
-        $sortedFactors = $app.RiskFactors |
+        $sortedFactors = $riskScoredFactors |
             ForEach-Object { [PSCustomObject]@{ Factor = $_; Order = $factorIndex++ } } |
             Sort-Object -Property @{ Expression = { $_.Factor.Points }; Descending = $true }, @{ Expression = { $_.Order }; Ascending = $true } |
             ForEach-Object { $_.Factor }
@@ -2109,9 +2143,9 @@ foreach ($app in $sortedReport) {
             }
             "<li style='display:flex;gap:8px;align-items:baseline;margin:2px 0'><span style='flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums'>$pointsCell</span><span>$factorText$detailMarker</span></li>"
         }) -join ""
-        "$riskScoreHeaderHtml$riskDisabledBannerHtml<ul style='margin:5px 0; padding-left: 4px; list-style:none'>$riskFactorItems</ul>$riskLevelLegendHtml"
+        "$riskScoreHeaderHtml$riskDisabledBannerHtml$riskScopeNoteBannerHtml<ul style='margin:5px 0; padding-left: 4px; list-style:none'>$riskFactorItems</ul>$riskLevelLegendHtml"
     } else {
-        "$riskScoreHeaderHtml$riskDisabledBannerHtml<div>No specific risk factors identified</div>$riskLevelLegendHtml"
+        "$riskScoreHeaderHtml$riskDisabledBannerHtml$riskScopeNoteBannerHtml<div>No specific risk factors identified</div>$riskLevelLegendHtml"
     }
     
     $safeDisplayName = ConvertTo-HtmlSafe $app.DisplayName
