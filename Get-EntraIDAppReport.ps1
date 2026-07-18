@@ -139,7 +139,9 @@ if ($ClientId -and $CertificateThumbprint -and -not $TenantId) {
     exit 1
 }
 
-# Make all unhandled errors terminating so they propagate through the try/catch/finally structure
+# Make all unhandled errors terminating. The main body below is wrapped in try/finally with
+# no catch, so an unhandled error still flows through the finally block (guaranteeing
+# Disconnect-MgGraph runs) before it terminates the script.
 $ErrorActionPreference = 'Stop'
 
 # Unattended runs: rendering Write-Progress is pure overhead and noise in pipeline logs
@@ -171,23 +173,94 @@ $script:HighValueTargetApps = @{
 # Risk scoring configuration
 $riskConfig = @{
     HighRiskPermissions = @(
-        'Directory.ReadWrite.All', 'Directory.AccessAsUser.All', 'User.ReadWrite.All',
-        'Group.ReadWrite.All', 'Application.ReadWrite.All', 'RoleManagement.ReadWrite.Directory',
-        'Policy.ReadWrite.All', 'Sites.FullControl.All', 'Files.ReadWrite.All',
-        'Mail.ReadWrite', 'Calendars.ReadWrite', 'Contacts.ReadWrite',
-        'DeviceManagementConfiguration.ReadWrite.All', 'DeviceManagementApps.ReadWrite.All',
-        'Policy.ReadWrite.ConditionalAccess', 'User.DeleteRestore.All', 'User.EnableDisableAccount.All',
-        'PrivilegedAccess.ReadWrite.AzureADGroup', 'PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup',
-        'RoleAssignmentSchedule.ReadWrite.Directory', 'UserAuthenticationMethod.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All',
-        'Domain.ReadWrite.All', 'RoleManagementPolicy.ReadWrite.AzureADGroup', 'RoleManagementPolicy.ReadWrite.Directory',
-        'GroupMember.ReadWrite.All', 'DeviceManagementRBAC.ReadWrite.All', 'EntitlementManagement.ReadWrite.All',
-        'Organization.ReadWrite.All', 'Policy.ReadWrite.AuthenticationMethod', 'Policy.ReadWrite.PermissionGrant',
-        'Directory.Read.All'
+        'AppRoleAssignment.ReadWrite.All', 'Application.ReadWrite.All', 'Calendars.ReadWrite', 'Contacts.ReadWrite',
+        'CustomAuthenticationExtension.ReadWrite.All', 'CustomSecAttributeDefinition.ReadWrite.All',
+        'DelegatedAdminRelationship.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All',
+        'DeviceManagementApps.ReadWrite.All', 'DeviceManagementCloudCA.ReadWrite.All',
+        'DeviceManagementConfiguration.ReadWrite.All', 'DeviceManagementEndpointSecurity.ReadWrite.All',
+        'DeviceManagementManagedDevices.ReadWrite.All', 'DeviceManagementRBAC.ReadWrite.All',
+        'DeviceManagementScripts.ReadWrite.All', 'DeviceManagementServiceConfig.ReadWrite.All',
+        'Directory.AccessAsUser.All', 'Directory.Read.All', 'Directory.ReadWrite.All', 'Domain.ReadWrite.All',
+        'EntitlementManagement.ReadWrite.All', 'Files.ReadWrite.All', 'Group.ReadWrite.All',
+        'GroupMember.ReadWrite.All', 'IdentityProvider.ReadWrite.All', 'Mail.ReadWrite',
+        'ManagedTenant.ReadWrite.All', 'ManagedTenants.ReadWrite.All', 'MultiTenantOrganization.ReadWrite.All',
+        'MutualTlsOauthConfiguration.ReadWrite.All', 'OnPremDirectorySynchronization.ReadWrite.All',
+        'Organization.ReadWrite.All', 'Policy.ReadWrite.AccessReview', 'Policy.ReadWrite.All',
+        'Policy.ReadWrite.ApplicationConfiguration', 'Policy.ReadWrite.AuthenticationFlows',
+        'Policy.ReadWrite.AuthenticationMethod', 'Policy.ReadWrite.Authorization',
+        'Policy.ReadWrite.B2BManagementPolicy', 'Policy.ReadWrite.BBManagementPolicy',
+        'Policy.ReadWrite.ConditionalAccess', 'Policy.ReadWrite.ConsentRequest',
+        'Policy.ReadWrite.CrossTenantAccess', 'Policy.ReadWrite.CrossTenantCapability',
+        'Policy.ReadWrite.DeviceConfiguration', 'Policy.ReadWrite.ExternalIdentities',
+        'Policy.ReadWrite.FeatureRollout', 'Policy.ReadWrite.FedTokenValidation',
+        'Policy.ReadWrite.HybridAuthentication', 'Policy.ReadWrite.IdentityProtection',
+        'Policy.ReadWrite.MobilityManagement', 'Policy.ReadWrite.OnPremAuthenticationPolicy',
+        'Policy.ReadWrite.PermissionGrant', 'Policy.ReadWrite.Recovery', 'Policy.ReadWrite.SecurityDefaults',
+        'Policy.ReadWrite.TrustFramework', 'PrivilegedAccess-CustomExt.ReadWrite.All',
+        'PrivilegedAccess.ReadWrite.AzureAD', 'PrivilegedAccess.ReadWrite.AzureADGroup',
+        'PrivilegedAccess.ReadWrite.AzureResources', 'PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup',
+        'PrivilegedAssignmentSchedule.ReadWrite.EntraAppRole', 'PrivilegedAssignmentSchedule.Remove.AzureADGroup',
+        'PublicKeyInfrastructure.ReadWrite.All', 'RoleAssignmentSchedule.ReadWrite.Directory',
+        'RoleAssignmentSchedule.Remove.Directory', 'RoleEligibilitySchedule.ReadWrite.Directory',
+        'RoleEligibilitySchedule.Remove.Directory', 'RoleManagement.ReadWrite.CloudPC',
+        'RoleManagement.ReadWrite.Defender', 'RoleManagement.ReadWrite.Directory',
+        'RoleManagement.ReadWrite.Exchange', 'RoleManagementAlert.ReadWrite.Directory',
+        'RoleManagementPolicy.ReadWrite.AzureADGroup', 'RoleManagementPolicy.ReadWrite.Directory',
+        'RoleManagementPolicy.ReadWrite.EntraAppRole', 'SignInIdentifier.ReadWrite.All', 'Sites.FullControl.All',
+        'TrustFrameworkKeySet.ReadWrite.All', 'User-PasswordProfile.ReadWrite.All', 'User.DeleteRestore.All',
+        'User.EnableDisableAccount.All', 'User.ReadWrite.All', 'UserAuthenticationMethod.ReadWrite',
+        'UserAuthenticationMethod.ReadWrite.All'
     )
     MediumRiskPermissions = @(
-        'User.Read.All', 'Group.Read.All',
-        'Application.Read.All', 'Sites.Read.All', 'Files.Read.All',
-        'Mail.Read', 'Mail.Send', 'User.ReadBasic.All'
+        'AgentIdentity.ReadWrite.All', 'AgentIdentityBlueprint.ReadWrite.All',
+        'AgentIdentityBlueprintPrincipal.ReadWrite.All', 'Application.Read.All',
+        'BackupRestore-Configuration.ReadWrite.All', 'BackupRestore-Control.ReadWrite.All',
+        'BackupRestore-Restore.ReadWrite.All', 'BillingConfiguration.ReadWrite.All', 'CaseManagement.ReadWrite.All',
+        'ConfigurationMonitoring.ReadWrite.All', 'CopilotPackages.ReadWrite.All',
+        'CrossTenantUserProfileSharing.ReadWrite.All', 'CustomDetection.ReadWrite.All',
+        'CustomSecAttributeAssignment.ReadWrite.All', 'DeviceManagementApps.Read.All',
+        'DeviceManagementCloudCA.Read.All', 'DeviceManagementConfiguration.Read.All',
+        'DeviceManagementEndpointSecurity.Read.All', 'DeviceManagementManagedDevices.PrivilegedOperations.All',
+        'DeviceManagementManagedDevices.PriviligedOperation.All', 'DeviceManagementManagedDevices.Read.All',
+        'DeviceManagementRBAC.Read.All', 'DeviceManagementScripts.Read.All',
+        'DeviceManagementServiceConfig.Read.All', 'DeviceTemplate.ReadWrite.All', 'Domain.Read.All',
+        'EntitlementManagement.Read.All', 'ExternalConnection.ReadWrite.All', 'ExternalItem.ReadWrite.All',
+        'ExternalUserProfile.ReadWrite.All', 'Files.Read.All', 'Group.Read.All', 'GroupSettings.ReadWrite.All',
+        'HealthMonitoringAlert.ReadWrite.All', 'HealthMonitoringAlertConfig.ReadWrite.All',
+        'IdentityRiskEvent.ReadWrite.All', 'IdentityRiskyAgent.ReadWrite.All',
+        'IdentityRiskyServicePrincipal.ReadWrite.All', 'IdentityRiskyUser.ReadWrite.All',
+        'IdentityUserFlow.ReadWrite.All', 'LicenseAssignment.ReadWrite.All', 'Mail-Advanced.ReadWrite.All',
+        'Mail.Read', 'Mail.Send', 'MailboxFolder.ReadWrite.All', 'MailboxItem.ReadWrite.All',
+        'NetworkAccess.ReadWrite.All', 'NetworkAccessBranch.ReadWrite.All', 'NetworkAccessPolicy.ReadWrite.All',
+        'OnPremisesPublishingProfiles.ReadWrite.All', 'OrganizationalBranding.ReadWrite.All',
+        'PartnerSecurity.ReadWrite.All', 'Policy.Read.All', 'Policy.Read.AuthenticationMethod',
+        'Policy.Read.B2BManagementPolicy', 'Policy.Read.BBManagementPolicy', 'Policy.Read.ConditionalAccess',
+        'Policy.Read.CrossTenantAccess', 'Policy.Read.DeviceConfiguration', 'Policy.Read.HybridAuthentication',
+        'Policy.Read.IdentityProtection', 'Policy.Read.OnPremAuthenticationPolicy', 'Policy.Read.PermissionGrant',
+        'Policy.Read.Recovery', 'PrivilegedAccess-CustomExt.Read.All', 'PrivilegedAccess.Read.AzureAD',
+        'PrivilegedAccess.Read.AzureADGroup', 'PrivilegedAccess.Read.AzureResources',
+        'PrivilegedAssignmentSchedule.Read.AzureADGroup', 'PrivilegedAssignmentSchedule.Read.EntraAppRole',
+        'RecordsManagement.ReadWrite.All', 'RiskPreventionProviders.ReadWrite.All',
+        'RoleAssignmentSchedule.Read.Directory', 'RoleEligibilitySchedule.Read.Directory', 'RoleManagement.Read.All',
+        'RoleManagement.Read.CloudPC', 'RoleManagement.Read.Defender', 'RoleManagement.Read.Directory',
+        'RoleManagement.Read.Exchange', 'RoleManagementAlert.Read.Directory',
+        'RoleManagementPolicy.Read.AzureADGroup', 'RoleManagementPolicy.Read.Directory',
+        'RoleManagementPolicy.Read.EntraAppRole', 'SecurityActions.ReadWrite.All', 'SecurityAlert.ReadWrite.All',
+        'SecurityAnalyzedMessage.ReadWrite.All', 'SecurityCopilotWorkspaces.ReadWrite.All',
+        'SecurityEvents.ReadWrite.All', 'SecurityIdentitiesActions.ReadWrite.All',
+        'SecurityIdentitiesAutoConfig.ReadWrite.All', 'SecurityIdentitiesHealth.ReadWrite.All',
+        'SecurityIdentitiesMigration.ReadWrite.All', 'SecurityIdentitiesSensors.ReadWrite.All',
+        'SecurityIdentitiesUserActions.ReadWrite.All', 'SecurityIncident.ReadWrite.All',
+        'SharePointTenantSettings.ReadWrite.All', 'Sites.Read.All', 'Sites.ReadWrite.All',
+        'SpiffeTrustDomain.ReadWrite.All', 'SubjectRightsRequest.ReadWrite.All', 'Synchronization.ReadWrite.All',
+        'TenantGovernance-Invitation.ReadWrite.All', 'TenantGovernance-PolicyTemplate.ReadWrite.All',
+        'TenantGovernance-RelatedTenant.ReadWrite.All', 'TenantGovernance-Relationship.ReadWrite.All',
+        'TenantGovernance-Request.ReadWrite.All', 'TenantGovernance-Setting.ReadWrite.All',
+        'ThreatAssessment.ReadWrite.All', 'ThreatSubmission.ReadWrite.All', 'ThreatSubmissionPolicies.ReadWrite.All',
+        'ThreatSubmissionPolicy.ReadWrite.All', 'User-ConvertToInternal.ReadWrite.All',
+        'User-LifeCycleInfo.ReadWrite.All', 'User-Mail.ReadWrite.All', 'User-OnPremisesSyncBehavior.ReadWrite.All',
+        'User.Read.All', 'User.ReadBasic.All', 'UserAuthenticationMethod.Read', 'UserAuthenticationMethod.Read.All',
+        'WindowsUpdates.ReadWrite.All', 'eDiscovery.ReadWrite.All'
     )
     HighRiskDirectoryRoles = @(
         'Agent ID Administrator', 'AI Administrator', 'AI Reader',
@@ -394,8 +467,8 @@ function Get-ServicePrincipalOwners {
     # Owners stay per-object (not bulk pre-fetched): $expand=owners on the list endpoint
     # returns at most ~20 items per object with no nested paging, which would undercount.
     try {
-        $spOwners = Get-MgServicePrincipalOwner -ServicePrincipalId $ServicePrincipalId -All `
-            -Property 'id,displayName,userPrincipalName,appId' -ErrorAction SilentlyContinue
+        $spOwners = Invoke-MgWithRetry { Get-MgServicePrincipalOwner -ServicePrincipalId $ServicePrincipalId -All `
+            -Property 'id,displayName,userPrincipalName,appId' -ErrorAction SilentlyContinue }
         $spOwnerDetails = @()
         foreach ($owner in $spOwners) {
             $spOwnerDetails += Resolve-OwnerObject -Owner $owner -Source 'ServicePrincipal'
@@ -411,8 +484,8 @@ function Get-ServicePrincipalOwners {
     try {
         $app = Get-AppRegistrationCached -AppId $AppId
         if ($app) {
-            $appOwners = Get-MgApplicationOwner -ApplicationId $app.Id -All `
-                -Property 'id,displayName,userPrincipalName,appId' -ErrorAction SilentlyContinue
+            $appOwners = Invoke-MgWithRetry { Get-MgApplicationOwner -ApplicationId $app.Id -All `
+                -Property 'id,displayName,userPrincipalName,appId' -ErrorAction SilentlyContinue }
             $appOwnerDetails = @()
             foreach ($owner in $appOwners) {
                 $appOwnerDetails += Resolve-OwnerObject -Owner $owner -Source 'AppRegistration'
@@ -462,11 +535,6 @@ function Get-RiskScore {
         [array]$Permissions,
         [array]$DirectoryRoles,
         [string]$DisplayName,
-        [bool]$HasCredentials,
-        [bool]$HasAppRegistration,
-        [bool]$HasServicePrincipalOwners,
-        [bool]$HasAppRegistrationOwners,
-        [bool]$HasAnyOwners,
         [bool]$AssignmentRequired,
         $TotalUsers,
         [bool]$IsInternalApp,
@@ -477,8 +545,8 @@ function Get-RiskScore {
         [bool]$HasServicePrincipalCredentials = $false,
         [bool]$IsEnabled = $true,
         [bool]$IsVerifiedPublisher = $false,
-        [bool]$IsHighValueTargetApp = $false,
-        [string]$HighValueTargetName = $null
+        [bool]$IsAgentBlueprint = $false,
+        [bool]$IsHighValueTargetApp = $false
     )
     
     $score = 0
@@ -488,12 +556,16 @@ function Get-RiskScore {
     $uniqueHighRiskPerms = @()
     $uniqueMediumRiskPerms = @()
     $hasApplicationPerms = $false
+    $hasDelegatedPerms = $false
     $hasUngovernedConsent = $false
-    
+
     foreach ($perm in $Permissions) {
         # Track application permissions separately
         if ($perm.Type -eq "Application") {
             $hasApplicationPerms = $true
+        }
+        if ($perm.Type -eq "Delegated") {
+            $hasDelegatedPerms = $true
         }
 
         # Track ungoverned (self-service) consent — a High/Medium risk delegated permission
@@ -585,9 +657,11 @@ function Get-RiskScore {
         if ($IsHighValueTargetApp) {
             $score += 50
             $riskFactors += [PSCustomObject]@{ Text = "Assignment not required for high-value app, open to all users"; Points = 50; Detail = "High-value first-party tools (Azure CLI, Azure PowerShell, etc.) are frequent phishing and token-theft targets. Restrict via Assignment Required."; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" }
-        } else {
+        } elseif ($hasDelegatedPerms) {
             $score += 5
-            $riskFactors += [PSCustomObject]@{ Text = "Assignment not required, open to all users"; Points = 5; Url = "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" }
+            $openAccessText = if ($IsAgentBlueprint) { "Assignment not required, open to any authenticated principal" } else { "Assignment not required, open to all users" }
+            $openAccessUrl  = if ($IsAgentBlueprint) { "https://learn.microsoft.com/en-us/entra/agent-id/control-user-access-agents" } else { "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/application-properties#assignment-required" }
+            $riskFactors += [PSCustomObject]@{ Text = $openAccessText; Points = 5; Url = $openAccessUrl }
         }
     }
 
@@ -599,13 +673,19 @@ function Get-RiskScore {
     # above already conveys unrestricted exposure, so this note would be redundant. Flagged with
     # IsBanner so the HTML renderer routes it to a standalone banner instead of the scored list.
     if ($AssignmentRequired -and ($hasApplicationPerms -or $uniqueRoles.Count -gt 0)) {
-        $riskFactors += [PSCustomObject]@{ Text = "Assignment Required doesn't restrict Application permissions or Directory Roles. Those work via the app registration's certificates, secrets, or federated credentials."; Points = 0; IsBanner = $true; Url = "https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals" }
+        $assignmentBannerText = if ($IsAgentBlueprint) {
+            "Assignment Required doesn't restrict Application permissions or Directory Roles. Those work through the blueprint's certificates, secrets, or federated credentials. Anyone holding one of these credentials can also act as any agent identity or agent user created from this blueprint."
+        } else {
+            "Assignment Required doesn't restrict Application permissions or Directory Roles. Those work via the app registration's certificates, secrets, or federated credentials."
+        }
+        $assignmentBannerUrl = if ($IsAgentBlueprint) { "https://learn.microsoft.com/en-us/entra/agent-id/agent-blueprint" } else { "https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals" }
+        $riskFactors += [PSCustomObject]@{ Text = $assignmentBannerText; Points = 0; IsBanner = $true; Url = $assignmentBannerUrl }
     }
 
-    # Credential type: secrets are less secure than certificates
+    # Credential type: secrets are less secure than certificates or federated credentials
     if ($UsesPasswordSecrets) {
         $score += 5
-        $riskFactors += [PSCustomObject]@{ Text = "Uses password secrets (certificates preferred)"; Points = 5; Detail = "Microsoft recommends that you use a certificate instead of a client secret before moving the application to a production environment." }
+        $riskFactors += [PSCustomObject]@{ Text = "Uses client secrets (certificate or federated credential preferred)"; Points = 5; Detail = "Microsoft recommends using a certificate or a federated identity credential instead of a client secret before moving the application to a production environment." }
     }
 
     # Multiple secrets increase attack surface
@@ -706,6 +786,20 @@ function Get-ApplicationCredentials {
         Write-Verbose "Could not retrieve App Registration credentials for AppId '$AppId': $($_.Exception.Message)"
     }
 
+    # Federated Identity Credentials (FIC) live on the Application object only — no
+    # StartDateTime/EndDateTime, they're designed to never expire. Reuses the App Registration
+    # object already resolved above via Get-AppRegistrationCached; only queried when one exists.
+    $ficList = @()
+    if ($hasAppReg -and $appRegId) {
+        try {
+            $ficList = Invoke-MgWithRetry { Get-MgApplicationFederatedIdentityCredential -ApplicationId $appRegId -All -ErrorAction SilentlyContinue }
+        }
+        catch {
+            Write-Verbose "Could not retrieve federated identity credentials for AppId '$AppId': $($_.Exception.Message)"
+        }
+    }
+    $ficCount = @($ficList).Count
+
     $totalActiveSecrets = $spActiveSecrets.Count + $appActiveSecrets.Count
     $totalActiveCerts   = $spActiveCerts.Count + $appActiveCerts.Count
     $totalExpiring      = $spExpiring.Count + $appExpiring.Count
@@ -723,7 +817,7 @@ function Get-ApplicationCredentials {
     return @{
         HasAppRegistration   = $hasAppReg
         AppRegistrationId    = $appRegId
-        HasActiveCredentials = ($totalActiveSecrets -gt 0 -or $totalActiveCerts -gt 0)
+        HasActiveCredentials = ($totalActiveSecrets -gt 0 -or $totalActiveCerts -gt 0 -or $ficCount -gt 0)
         ActiveSecrets        = $totalActiveSecrets
         ActiveCertificates   = $totalActiveCerts
         ExpiringCredentials  = $totalExpiring
@@ -736,6 +830,9 @@ function Get-ApplicationCredentials {
         ActiveSecretList       = @($spActiveSecrets) + @($appActiveSecrets)
         ExpiredCertificateList = @($spExpiredCerts) + @($appExpiredCerts)
         ExpiredSecretList      = @($spExpiredSecrets) + @($appExpiredSecrets)
+        FederatedCredentials     = $ficCount
+        HasFederatedCredentials  = ($ficCount -gt 0)
+        FederatedCredentialList  = $ficList
     }
 }
 
@@ -1164,6 +1261,17 @@ foreach ($sp in $servicePrincipals) {
     $isVerifiedPublisher = [bool]($sp.VerifiedPublisher -and $sp.VerifiedPublisher.DisplayName)
     $verifiedPublisherName = if ($isVerifiedPublisher) { $sp.VerifiedPublisher.DisplayName } else { $null }
 
+    # App Type classification: Enterprise Application (default) / App Proxy / Agent Blueprint.
+    # Independent from App Ownership (internal/Microsoft/third-party) — an App Proxy app or an
+    # Agent Blueprint can be any ownership type; a third-party blueprint is simply AppType=blueprint
+    # AND Ownership=third-party shown as two separate, independently filterable signals.
+    # Agent Blueprint principals inherit from servicePrincipal and are distinguished only by
+    # @odata.type — confirmed present in AdditionalProperties even under this script's existing
+    # restricted -Property select (verified manually against a live tenant before implementation).
+    $isAgentBlueprint = $sp.AdditionalProperties['@odata.type'] -eq '#microsoft.graph.agentIdentityBlueprintPrincipal'
+    $isAppProxy = $sp.Tags -contains 'WindowsAzureActiveDirectoryOnPremApp'
+    $appType = if ($isAgentBlueprint) { 'blueprint' } elseif ($isAppProxy) { 'appproxy' } else { 'enterprise' }
+
     # High-value target app — first-party CLI/automation apps that are common abuse targets
     $isHighValueTargetApp = $script:HighValueTargetApps.ContainsKey($sp.AppId)
     $highValueTargetName = if ($isHighValueTargetApp) { $script:HighValueTargetApps[$sp.AppId] } else { $null }
@@ -1173,11 +1281,6 @@ foreach ($sp in $servicePrincipals) {
         -Permissions $permissions `
         -DirectoryRoles ($permissionInfo.RoleAssignments | ForEach-Object { @{Permission = $_.DisplayName} }) `
         -DisplayName $sp.DisplayName `
-        -HasCredentials $credentials.HasActiveCredentials `
-        -HasAppRegistration $credentials.HasAppRegistration `
-        -HasServicePrincipalOwners $ownerInfo.HasServicePrincipalOwners `
-        -HasAppRegistrationOwners $ownerInfo.HasAppRegistrationOwners `
-        -HasAnyOwners $ownerInfo.HasAnyOwners `
         -AssignmentRequired $assignmentRequired `
         -TotalUsers $totalUsersAffected `
         -IsInternalApp $isInternalApp `
@@ -1188,14 +1291,15 @@ foreach ($sp in $servicePrincipals) {
         -HasServicePrincipalCredentials $credentials.HasServicePrincipalCredentials `
         -IsEnabled $isEnabled `
         -IsVerifiedPublisher $isVerifiedPublisher `
-        -IsHighValueTargetApp $isHighValueTargetApp `
-        -HighValueTargetName $highValueTargetName
+        -IsAgentBlueprint $isAgentBlueprint `
+        -IsHighValueTargetApp $isHighValueTargetApp
     $report += [PSCustomObject]@{
         DisplayName = $sp.DisplayName
         AppId = $sp.AppId
         ServicePrincipalId = $sp.Id
         AppOwnerOrganizationId = $sp.AppOwnerOrganizationId
         CreatedDate = $sp.CreatedDateTime
+        AppType = $appType
         
         # App Registration info
         HasAppRegistration = $credentials.HasAppRegistration
@@ -1237,7 +1341,10 @@ foreach ($sp in $servicePrincipals) {
         ActiveSecretList        = $credentials.ActiveSecretList
         ExpiredCertificateList  = $credentials.ExpiredCertificateList
         ExpiredSecretList       = $credentials.ExpiredSecretList
-        
+        FederatedCredentials    = $credentials.FederatedCredentials
+        HasFederatedCredentials = $credentials.HasFederatedCredentials
+        FederatedCredentialList = $credentials.FederatedCredentialList
+
         # Risk assessment
         RiskScore = $riskAssessment.Score
         RiskLevel = $riskAssessment.Level
@@ -1292,7 +1399,7 @@ $appsWithActiveCredentials = @($report | Where-Object { $_.HasActiveCredentials 
 $appsWithExpiringCredentials = @($report | Where-Object { $_.ExpiringCredentials -gt 0 }).Count
 
 # Get tenant information
-$tenantInfo = Get-MgOrganization | Select-Object -First 1
+$tenantInfo = Invoke-MgWithRetry { Get-MgOrganization } | Select-Object -First 1
 $tenantName = $tenantInfo.DisplayName
 $tenantId = $tenantInfo.Id
 
@@ -1601,7 +1708,6 @@ $html = @"
         .filter-summary { font-size: 13px; font-weight: 600; color: var(--text); }
 
         .clickable-badge { cursor: pointer; transition: filter 0.15s, box-shadow 0.15s; }
-        .clickable-badge:hover { filter: brightness(1.15); }
 
         .filter-search {
             width: 100%;
@@ -1729,7 +1835,6 @@ $html = @"
         .badge.orange  { background: #d83b01; }
         .badge.amber   { background: #b06000; }
         .badge.blue    { background: #0078d4; }
-        .badge.teal    { background: #00827f; }
         .badge.purple  { background: #7054a0; }
         .badge.gray    { background: #767676; }
 
@@ -1944,6 +2049,12 @@ $html = @"
             <span class="filter-tag c-gray"  data-group="enabled" data-value="no"  onclick="toggleTag(this)">Disabled <span class="cnt"></span></span>
         </div>
         <div class="filter-group">
+            <span class="filter-group-label">App Type</span>
+            <span class="filter-tag c-gray"  data-group="apptype" data-value="enterprise" onclick="toggleTag(this)">Enterprise Application <span class="cnt"></span></span>
+            <span class="filter-tag c-green" data-group="apptype" data-value="appproxy"   onclick="toggleTag(this)">App Proxy <span class="cnt"></span></span>
+            <span class="filter-tag c-blue"  data-group="apptype" data-value="blueprint"  onclick="toggleTag(this)">Agent Blueprint <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
             <span class="filter-group-label">Ownership</span>
             <span class="filter-tag c-green" data-group="ownership" data-value="internal"    onclick="toggleTag(this)">Internal <span class="cnt"></span></span>
             <span class="filter-tag c-blue"  data-group="ownership" data-value="microsoft"   onclick="toggleTag(this)">Microsoft <span class="cnt"></span></span>
@@ -1993,6 +2104,7 @@ $html = @"
             <span class="filter-group-label">Credentials</span>
             <span class="filter-tag c-green" data-group="credentials" data-value="certs"    onclick="toggleTag(this)">Has Certs <span class="cnt"></span></span>
             <span class="filter-tag c-amber"  data-group="credentials" data-value="secrets"  onclick="toggleTag(this)">Has Secrets <span class="cnt"></span></span>
+            <span class="filter-tag c-green" data-group="credentials" data-value="federated" onclick="toggleTag(this)">Has Federated <span class="cnt"></span></span>
             <span class="filter-tag c-red"    data-group="credentials" data-value="sp-creds" onclick="toggleTag(this)">Has SP Credentials <span class="cnt"></span></span>
             <span class="filter-tag c-orange" data-group="credentials" data-value="expiring" onclick="toggleTag(this)">Expiring <span class="cnt"></span></span>
             <span class="filter-tag c-red"    data-group="credentials" data-value="expired"  onclick="toggleTag(this)">Expired <span class="cnt"></span></span>
@@ -2012,13 +2124,14 @@ $html = @"
                 <th onclick="sortTable('reportTable', 0, 'string')">Application Name</th>
                 <th onclick="sortTable('reportTable', 1, 'string')">Enabled</th>
                 <th onclick="sortTable('reportTable', 2, 'string')">App ID</th>
-                <th onclick="sortTable('reportTable', 3, 'string')">App Ownership</th>
-                <th onclick="sortTable('reportTable', 4, 'string')">Has App Registration</th>
-                <th onclick="sortTable('reportTable', 5, 'string')">Assignment Required</th>
-                <th onclick="sortTable('reportTable', 6, 'string')">Owners</th>
-                <th onclick="sortTable('reportTable', 7, 'string')">Risk Level</th>
+                <th onclick="sortTable('reportTable', 3, 'string')">App Type</th>
+                <th onclick="sortTable('reportTable', 4, 'string')">App Ownership</th>
+                <th onclick="sortTable('reportTable', 5, 'string')">Has App Registration</th>
+                <th onclick="sortTable('reportTable', 6, 'string')">Assignment Required</th>
+                <th onclick="sortTable('reportTable', 7, 'string')">Owners</th>
+                <th onclick="sortTable('reportTable', 8, 'string')">Risk Level</th>
                 <th>Permissions</th>
-                <th onclick="sortTable('reportTable', 9, 'string')">Credentials</th>
+                <th onclick="sortTable('reportTable', 10, 'string')">Credentials</th>
             </tr>
         </thead>
         <tbody>
@@ -2029,13 +2142,31 @@ $sortedReport = $report | Sort-Object @{Expression="RiskScore"; Descending=$true
 $modalDataEntries = [System.Collections.Generic.List[string]]::new()
 
 foreach ($app in $sortedReport) {
+    # GUID identifiers from Graph — escaped for consistency with every other API-sourced field
+    # rendered as HTML text. ConvertTo-HtmlSafe is a no-op on a well-formed GUID (hex + hyphens
+    # only), so this doesn't affect the value used for portal URLs or the mono <code> display.
+    $safeAppId = ConvertTo-HtmlSafe $app.AppId
+    $safeServicePrincipalId = ConvertTo-HtmlSafe $app.ServicePrincipalId
     $riskClass = "risk-" + $app.RiskLevel.ToLower()
     $appRegClass = if ($app.HasAppRegistration) { "has-app-reg" } else { "sp-only" }
     $appRegText = if ($app.HasAppRegistration) { "<span class='badge green clickable-badge' data-fg='appreg' data-fv='yes' title='Has a linked App Registration in this tenant.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='appreg' data-fv='no' title='Service principal only. No App Registration found.'>No</span>" }
     $enabledText = if ($app.IsEnabled) { "<span class='badge green clickable-badge' data-fg='enabled' data-fv='yes' title='Active. Users can sign in to this application.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='enabled' data-fv='no' title='Sign in blocked. Visible in the tenant but cannot be used.'>No</span>" }
-    $portalUrl = "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/$($app.ServicePrincipalId)/appId/$($app.AppId)"
+    $portalUrl = "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/$safeServicePrincipalId/appId/$safeAppId"
     $enabledClass = if ($app.IsEnabled) { "app-enabled" } else { "app-disabled" }
-    
+
+    # App Type badge: Enterprise Application (default) / App Proxy / Agent Blueprint.
+    # Filter-only badge (like Enabled / App Reg / Assignment) — not a modal trigger.
+    $appTypeClass = switch ($app.AppType) {
+        'appproxy'  { "app-type-appproxy" }
+        'blueprint' { "app-type-blueprint" }
+        default     { "app-type-enterprise" }
+    }
+    $appTypeText = switch ($app.AppType) {
+        'appproxy'  { "<span class='badge green clickable-badge' data-fg='apptype' data-fv='appproxy' title='On-premises application published via Microsoft Entra Application Proxy for secure remote access without a VPN.'>App Proxy</span>" }
+        'blueprint' { "<span class='badge blue clickable-badge' data-fg='apptype' data-fv='blueprint' title='Template defining an AI agent identity configuration. Can be instantiated into multiple agent identities that inherit its permissions.'>Agent Blueprint</span>" }
+        default     { "<span class='badge gray clickable-badge' data-fg='apptype' data-fv='enterprise' title='Standard registered application instance in this tenant, created via app registration or consent.'>Enterprise Application</span>" }
+    }
+
     # Determine app ownership
     $isInternal = $app.AppOwnerOrganizationId -eq $tenantId
     $isMicrosoft = $app.AppOwnerOrganizationId -in $script:MicrosoftTenantIds
@@ -2069,9 +2200,12 @@ foreach ($app in $sortedReport) {
     }
     
     # Determine assignment requirement
-    $assignmentRequiredText = if ($app.AssignmentRequired) { "<span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Restricts interactive sign-in only. Application permissions and Directory Roles still work via client credentials.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='Any user can sign in interactively. Application permissions and Directory Roles are unaffected either way.'>No</span>" }
+    $assignmentRequiredText = if ($app.AssignmentRequired) { "<span class='badge green clickable-badge' data-fg='assignment' data-fv='required' title='Restricts access to assigned principals only. Application permissions and Directory Roles still work via client credentials.'>Yes</span>" } else { "<span class='badge gray clickable-badge' data-fg='assignment' data-fv='not-required' title='Any authenticated principal can access this application. Application permissions and Directory Roles are unaffected either way.'>No</span>" }
     if ($app.AssignmentRequired -and ($app.ApplicationPermissions -gt 0 -or $app.DirectoryRoles -gt 0)) {
         $assignmentRequiredText += "<div style='margin-top:4px'><span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].riskTitle,reportDetails['$($app.AppId)'].riskHtml)`" style='cursor:pointer' title='Assignment Required doesn&#39;t restrict Application permissions or Directory Roles, those work via Application registration certificates, secrets and federated credentials. Click to view details.'>Partial Mitigation</span></div>"
+    }
+    if ($app.AppType -eq 'appproxy') {
+        $assignmentRequiredText += "<div style='margin-top:4px'><span class='badge amber clickable-badge' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].appProxyPreAuthTitle,reportDetails['$($app.AppId)'].appProxyPreAuthHtml)`" style='cursor:pointer' title='This report cannot determine the Pre-Authentication mode. Click for details.'>Verify Pre-Auth</span></div>"
     }
     $assignmentRequiredClass = if ($app.AssignmentRequired) { "assignment-required" } else { "assignment-not-required" }
     
@@ -2107,10 +2241,13 @@ foreach ($app in $sortedReport) {
         $certsBadge = "<span class='badge gray' title='No active certificates'>Certs: 0</span>"
     }
     if ($app.ActiveSecrets -gt 0) {
-        $secretsBadge = "<span class='badge amber' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].secretsTitle,reportDetails['$($app.AppId)'].secretsHtml)`" style='cursor:pointer' title='Active client secret credentials. Click to view details.'>Secrets: $($app.ActiveSecrets)</span>"
+        $secretsBadge = "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].secretsTitle,reportDetails['$($app.AppId)'].secretsHtml)`" style='cursor:pointer' title='Active client secret credentials. Click to view details.'>Secrets: $($app.ActiveSecrets)</span>"
     } else {
         $secretsBadge = "<span class='badge gray' title='No active secrets'>Secrets: 0</span>"
     }
+    $ficBadge = if ($app.FederatedCredentials -gt 0) {
+        "<span class='badge green' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].ficTitle,reportDetails['$($app.AppId)'].ficHtml)`" style='cursor:pointer' title='Federated Identity Credentials do not expire and are the Microsoft-recommended alternative to secrets. Click to view details.'>Federated: $($app.FederatedCredentials)</span>"
+    } else { "<span class='badge gray'>Federated: 0</span>" }
     $expiringBadgeHtml = ""
     if ($app.ExpiringCredentials -gt 0) {
         $expiringBadgeHtml = "<span class='badge orange' onclick=`"openDetailModal(reportDetails['$($app.AppId)'].expiringTitle,reportDetails['$($app.AppId)'].expiringHtml)`" style='cursor:pointer' title='Expiring within 30 days. Renew to avoid authentication failures. Click to view details.'>Expiring: $($app.ExpiringCredentials)</span>"
@@ -2273,6 +2410,10 @@ foreach ($app in $sortedReport) {
             ForEach-Object { $_.Factor }
         $riskFactorItems = ($sortedFactors | ForEach-Object {
             $factorText = ConvertTo-HtmlSafe $_.Text
+            # Known limitation: the two .Replace() calls below are naive substring replaces, not
+            # exact-token replaces. Not currently exploitable — no permission/role name is a
+            # substring of unrelated factor wording today — but a future factor-text change could
+            # cause unintended double-linking here without raising any error.
             # Linkify the permission name to the Graph Permissions Explorer (same as the permission modals)
             if ($_.Permission) {
                 $safePerm = ConvertTo-HtmlSafe $_.Permission
@@ -2354,12 +2495,15 @@ foreach ($app in $sortedReport) {
     if ($app.ActiveCertificateList -and $app.ActiveCertificateList.Count -gt 0) {
         $certRows = ($app.ActiveCertificateList | ForEach-Object {
             $cName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
+            $cwapHint = if ($app.AppType -eq 'appproxy' -and $_.DisplayName -eq 'CWAP_AuthSecret') {
+                " <a href='https://learn.microsoft.com/en-us/entra/identity/app-proxy/application-proxy-faq#an-application-proxy-app-s-client-secret--cwap-authsecret--is-nearing-expiry-or-has-already-expired--what-should-i-do-' target='_blank' title='Legacy Application Proxy secret. Application Proxy no longer relies on this credential type -- Federated Identity Credentials are used instead. Safe to ignore or remove. Click for details on Microsoft Learn.' style='cursor:pointer;color:var(--blue);display:inline-flex;vertical-align:middle'><svg width='12' height='12' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg' focusable='false' style='display:block'><circle cx='8' cy='8' r='7' stroke='currentColor' stroke-width='1.4'/><rect x='7.25' y='6.5' width='1.5' height='5.5' rx='0.75' fill='currentColor'/><rect x='7.25' y='3.75' width='1.5' height='1.5' rx='0.75' fill='currentColor'/></svg></a>"
+            } else { "" }
             $cStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $cEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $cKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
             $cEndClass = if ($_.EndDateTime -and $_.EndDateTime -le (Get-Date)) { "expired-date" } elseif ($_.EndDateTime -and $_.EndDateTime -lt (Get-Date).AddDays(30)) { "expiring-date" } else { "" }
             $cSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' onclick=`"addFilter('credentials','sp-creds'); toggleFilterPanel(true); closeDetailModal();`" style='margin-right:6px;cursor:pointer' title='Added directly to the Service Principal instead of the App Registration. Click to filter.'>SP Credential</span>" } else { "" }
-            "<tr><td style='padding:4px 8px'>$cSpBadge$cName</td><td style='padding:4px 8px'>$cStart</td><td style='padding:4px 8px' class='$cEndClass'>$cEnd</td><td style='padding:4px 8px'><code>$cKeyId</code></td></tr>"
+            "<tr><td style='padding:4px 8px'>$cSpBadge$cName$cwapHint</td><td style='padding:4px 8px'>$cStart</td><td style='padding:4px 8px' class='$cEndClass'>$cEnd</td><td style='padding:4px 8px'><code>$cKeyId</code></td></tr>"
         }) -join ""
         $certsModalHtml = "<table id='certsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('certsModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('certsModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('certsModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('certsModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$certRows</tbody></table>"
     } else {
@@ -2370,16 +2514,33 @@ foreach ($app in $sortedReport) {
     if ($app.ActiveSecretList -and $app.ActiveSecretList.Count -gt 0) {
         $secretRows = ($app.ActiveSecretList | ForEach-Object {
             $sName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
+            $cwapHint = if ($app.AppType -eq 'appproxy' -and $_.DisplayName -eq 'CWAP_AuthSecret') {
+                " <a href='https://learn.microsoft.com/en-us/entra/identity/app-proxy/application-proxy-faq#an-application-proxy-app-s-client-secret--cwap-authsecret--is-nearing-expiry-or-has-already-expired--what-should-i-do-' target='_blank' title='Legacy Application Proxy secret. Application Proxy no longer relies on this credential type -- Federated Identity Credentials are used instead. Safe to ignore or remove. Click for details on Microsoft Learn.' style='cursor:pointer;color:var(--blue);display:inline-flex;vertical-align:middle'><svg width='12' height='12' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg' focusable='false' style='display:block'><circle cx='8' cy='8' r='7' stroke='currentColor' stroke-width='1.4'/><rect x='7.25' y='6.5' width='1.5' height='5.5' rx='0.75' fill='currentColor'/><rect x='7.25' y='3.75' width='1.5' height='1.5' rx='0.75' fill='currentColor'/></svg></a>"
+            } else { "" }
             $sStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $sEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $sKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
             $sEndClass = if ($_.EndDateTime -and $_.EndDateTime -le (Get-Date)) { "expired-date" } elseif ($_.EndDateTime -and $_.EndDateTime -lt (Get-Date).AddDays(30)) { "expiring-date" } else { "" }
             $sSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' onclick=`"addFilter('credentials','sp-creds'); toggleFilterPanel(true); closeDetailModal();`" style='margin-right:6px;cursor:pointer' title='Added directly to the Service Principal instead of the App Registration. Click to filter.'>SP Credential</span>" } else { "" }
-            "<tr><td style='padding:4px 8px'>$sSpBadge$sName</td><td style='padding:4px 8px'>$sStart</td><td style='padding:4px 8px' class='$sEndClass'>$sEnd</td><td style='padding:4px 8px'><code>$sKeyId</code></td></tr>"
+            "<tr><td style='padding:4px 8px'>$sSpBadge$sName$cwapHint</td><td style='padding:4px 8px'>$sStart</td><td style='padding:4px 8px' class='$sEndClass'>$sEnd</td><td style='padding:4px 8px'><code>$sKeyId</code></td></tr>"
         }) -join ""
         $secretsModalHtml = "<table id='secretsModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('secretsModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('secretsModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('secretsModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('secretsModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$secretRows</tbody></table>"
     } else {
         $secretsModalHtml = "No active secrets"
+    }
+    # Federated Identity Credentials modal — no expiry concept, so shown separately from
+    # the Certs/Secrets/Expiring/Expired credential tables.
+    $ficModalTitle = "Federated Identity Credentials for $($app.DisplayName)"
+    if ($app.FederatedCredentialList -and @($app.FederatedCredentialList).Count -gt 0) {
+        $ficRows = ($app.FederatedCredentialList | ForEach-Object {
+            $fName      = ConvertTo-HtmlSafe "$($_.Name)"
+            $fIssuer    = ConvertTo-HtmlSafe "$($_.Issuer)"
+            $fSubject   = ConvertTo-HtmlSafe "$($_.Subject)"
+            "<tr><td style='padding:4px 8px'>$fName</td><td style='padding:4px 8px'><small>$fIssuer</small></td><td style='padding:4px 8px'><small>$fSubject</small></td></tr>"
+        }) -join ""
+        $ficModalHtml = "<table id='ficModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('ficModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th onclick=`"sortTable('ficModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Issuer</th><th onclick=`"sortTable('ficModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Subject</th></tr></thead><tbody>$ficRows</tbody></table>"
+    } else {
+        $ficModalHtml = "No federated identity credentials configured"
     }
     # Expiring / Expired credentials modals — combined certs + secrets, filtered to the relevant status
     $allCredsForStatus = @()
@@ -2400,11 +2561,14 @@ foreach ($app in $sortedReport) {
         $expiringRows = ($expiringCredList | ForEach-Object {
             $xKind  = ConvertTo-HtmlSafe $_.Kind
             $xName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
+            $cwapHint = if ($app.AppType -eq 'appproxy' -and $_.DisplayName -eq 'CWAP_AuthSecret') {
+                " <a href='https://learn.microsoft.com/en-us/entra/identity/app-proxy/application-proxy-faq#an-application-proxy-app-s-client-secret--cwap-authsecret--is-nearing-expiry-or-has-already-expired--what-should-i-do-' target='_blank' title='Legacy Application Proxy secret. Application Proxy no longer relies on this credential type -- Federated Identity Credentials are used instead. Safe to ignore or remove. Click for details on Microsoft Learn.' style='cursor:pointer;color:var(--blue);display:inline-flex;vertical-align:middle'><svg width='12' height='12' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg' focusable='false' style='display:block'><circle cx='8' cy='8' r='7' stroke='currentColor' stroke-width='1.4'/><rect x='7.25' y='6.5' width='1.5' height='5.5' rx='0.75' fill='currentColor'/><rect x='7.25' y='3.75' width='1.5' height='1.5' rx='0.75' fill='currentColor'/></svg></a>"
+            } else { "" }
             $xStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $xEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $xKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
             $xSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' onclick=`"addFilter('credentials','sp-creds'); toggleFilterPanel(true); closeDetailModal();`" style='margin-right:6px;cursor:pointer' title='Added directly to the Service Principal instead of the App Registration. Click to filter.'>SP Credential</span>" } else { "" }
-            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xSpBadge$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expiring-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
+            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xSpBadge$xName$cwapHint</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expiring-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
         }) -join ""
         $expiringModalHtml = "<table id='expiringModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('expiringModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('expiringModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('expiringModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('expiringModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('expiringModalTable',4,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$expiringRows</tbody></table>"
     } else {
@@ -2416,11 +2580,14 @@ foreach ($app in $sortedReport) {
         $expiredRows = ($expiredCredList | ForEach-Object {
             $xKind  = ConvertTo-HtmlSafe $_.Kind
             $xName  = if ($_.DisplayName) { ConvertTo-HtmlSafe $_.DisplayName } else { "<em>(no name)</em>" }
+            $cwapHint = if ($app.AppType -eq 'appproxy' -and $_.DisplayName -eq 'CWAP_AuthSecret') {
+                " <a href='https://learn.microsoft.com/en-us/entra/identity/app-proxy/application-proxy-faq#an-application-proxy-app-s-client-secret--cwap-authsecret--is-nearing-expiry-or-has-already-expired--what-should-i-do-' target='_blank' title='Legacy Application Proxy secret. Application Proxy no longer relies on this credential type -- Federated Identity Credentials are used instead. Safe to ignore or remove. Click for details on Microsoft Learn.' style='cursor:pointer;color:var(--blue);display:inline-flex;vertical-align:middle'><svg width='12' height='12' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg' focusable='false' style='display:block'><circle cx='8' cy='8' r='7' stroke='currentColor' stroke-width='1.4'/><rect x='7.25' y='6.5' width='1.5' height='5.5' rx='0.75' fill='currentColor'/><rect x='7.25' y='3.75' width='1.5' height='1.5' rx='0.75' fill='currentColor'/></svg></a>"
+            } else { "" }
             $xStart = if ($_.StartDateTime) { $_.StartDateTime.ToString("yyyy-MM-dd") } else { "—" }
             $xEnd   = if ($_.EndDateTime)   { $_.EndDateTime.ToString("yyyy-MM-dd") }   else { "—" }
             $xKeyId = ConvertTo-HtmlSafe "$($_.KeyId)"
             $xSpBadge = if ($_.Source -eq 'ServicePrincipal') { "<span class='badge red' onclick=`"addFilter('credentials','sp-creds'); toggleFilterPanel(true); closeDetailModal();`" style='margin-right:6px;cursor:pointer' title='Added directly to the Service Principal instead of the App Registration. Click to filter.'>SP Credential</span>" } else { "" }
-            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xSpBadge$xName</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expired-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
+            "<tr><td style='padding:4px 8px'>$xKind</td><td style='padding:4px 8px'>$xSpBadge$xName$cwapHint</td><td style='padding:4px 8px'>$xStart</td><td style='padding:4px 8px' class='expired-date'>$xEnd</td><td style='padding:4px 8px'><code>$xKeyId</code></td></tr>"
         }) -join ""
         $expiredModalHtml = "<table id='expiredModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('expiredModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('expiredModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Display Name</th><th onclick=`"sortTable('expiredModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Start</th><th onclick=`"sortTable('expiredModalTable',3,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Expires</th><th onclick=`"sortTable('expiredModalTable',4,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Key ID</th></tr></thead><tbody>$expiredRows</tbody></table>"
     } else {
@@ -2445,8 +2612,27 @@ foreach ($app in $sortedReport) {
     }
     $ownershipModalTitle = "App Ownership for $($app.DisplayName)"
     $ownershipModalHtml = "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:40%'>Ownership Type</td><td style='padding:6px 8px'>$ownershipLabel</td></tr>$publisherRow<tr><td style='padding:6px 8px;font-weight:bold'>Owner Tenant ID</td><td style='padding:6px 8px'><code>$safeOrgId</code></td></tr></tbody></table>"
+    # App Proxy Pre-Authentication modal — informational only, not scored. The underlying Graph
+    # property (onPremisesPublishing.externalAuthenticationType) is beta-only, so this report
+    # cannot determine Pre-Auth mode automatically; the modal tells the admin how to check manually.
+    if ($app.AppType -eq 'appproxy') {
+        $appProxyPreAuthTitle = "Pre-Authentication Mode for $($app.DisplayName)"
+        $appProxyPreAuthHtml = "<div class='risk-info-banner'>This report cannot automatically determine this app's Pre-Authentication mode. Please verify it manually.</div><table style='width:100%;border-collapse:collapse;font-size:13px'><tbody><tr><td style='padding:6px 8px;font-weight:bold;width:35%'>Microsoft Entra ID (recommended)</td><td style='padding:6px 8px'>Entra authenticates the user and enforces Conditional Access before forwarding traffic to the on-premises app.</td></tr><tr><td style='padding:6px 8px;font-weight:bold'>Passthrough</td><td style='padding:6px 8px'>Bypasses Entra authentication entirely. Conditional Access policies cannot be enforced. Traffic reaches the on-premises app directly.</td></tr></tbody></table><div style='margin-top:12px;font-size:12.5px'>To check: in the Entra admin center, open this app under Enterprise Applications, go to Application Proxy, and review the Pre-Authentication setting. <a href='https://learn.microsoft.com/en-us/entra/identity/app-proxy/application-proxy-security' target='_blank'>Learn more about Application Proxy security</a>.</div>"
+    } else {
+        $appProxyPreAuthTitle = ''
+        $appProxyPreAuthHtml = ''
+    }
     # Owners modal — all owners with Enterprise App / App Registration coverage
     $ownersModalTitle = "Owners for $($app.DisplayName)"
+    $ownerBannerText = if ($app.AppType -eq 'blueprint') {
+        if ($app.HasAppRegistration) {
+            "Owners can add or rotate this blueprint's credentials only through the App Registration side. Credentials cannot be added directly to the blueprint principal, agent identities, or agent users. A blueprint credential can authenticate as any agent identity or agent user created from it, not just the blueprint itself."
+        } else {
+            "This is a third-party blueprint with no local App Registration -- its credentials are managed entirely in the publishing tenant. No local owner can add, rotate, or view its credentials."
+        }
+    } else {
+        "Owners can add or rotate this app's credentials and authenticate as the app itself. This can let an owner manage users or other objects using the app's permissions, not just their own."
+    }
     if ($app.Owners -and $app.Owners.Count -gt 0) {
         $ownerRows = ($app.Owners | ForEach-Object {
             $oName = ConvertTo-HtmlSafe $_.DisplayName
@@ -2456,9 +2642,9 @@ foreach ($app in $sortedReport) {
             $onApp = if ($_.Source -eq 'AppRegistration'  -or $_.Source -eq 'Both') { "&#10003;" } else { "&#8212;" }
             "<tr><td style='padding:4px 8px'>$oName</td><td style='padding:4px 8px'>$oType</td><td style='padding:4px 8px'><small>$oUpn</small></td><td style='padding:4px 8px;text-align:center'>$onSp</td><td style='padding:4px 8px;text-align:center'>$onApp</td></tr>"
         }) -join ""
-        $ownersModalHtml = "<div class='risk-info-banner'>Owners can add or rotate this app's credentials and authenticate as the app itself. This can let an owner manage users or other objects using the app's permissions, not just their own.</div><table id='ownersModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('ownersModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th onclick=`"sortTable('ownersModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('ownersModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th onclick=`"sortTable('ownersModalTable',3,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App</th><th onclick=`"sortTable('ownersModalTable',4,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration</th></tr></thead><tbody>$ownerRows</tbody></table>"
+        $ownersModalHtml = "<div class='risk-info-banner'>$ownerBannerText</div><table id='ownersModalTable' style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr><th onclick=`"sortTable('ownersModalTable',0,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Name</th><th onclick=`"sortTable('ownersModalTable',1,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>Type</th><th onclick=`"sortTable('ownersModalTable',2,'string')`" style='text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)'>UPN / App ID</th><th onclick=`"sortTable('ownersModalTable',3,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>Enterprise App</th><th onclick=`"sortTable('ownersModalTable',4,'string')`" style='text-align:center;padding:4px 8px;border-bottom:1px solid var(--border)'>App Registration</th></tr></thead><tbody>$ownerRows</tbody></table>"
     } else {
-        $ownersModalHtml = "<div class='risk-info-banner'>Owners can add or rotate this app's credentials and authenticate as the app itself. This can let an owner manage users or other objects using the app's permissions, not just their own.</div>No owners assigned"
+        $ownersModalHtml = "<div class='risk-info-banner'>$ownerBannerText</div>No owners assigned"
     }
     # Ownership Gap modal — owners not present on both sides
     $ownershipGapModalTitle = "Ownership Gap for  $($app.DisplayName)"
@@ -2479,19 +2665,20 @@ foreach ($app in $sortedReport) {
     } else {
         $ownershipGapModalHtml = "No ownership gap detected. All owners are assigned to both the Enterprise App and App Registration."
     }
-    $modalDataEntries.Add("`"$safeKey`": { appPermsTitle: $(ConvertTo-Json $appPermsModalTitle -Compress), appPermsHtml: $(ConvertTo-Json $appPermItems -Compress), delegatedPermsTitle: $(ConvertTo-Json $delegatedPermsModalTitle -Compress), delegatedPermsHtml: $(ConvertTo-Json $delegatedPermItems -Compress), rolePermsTitle: $(ConvertTo-Json $rolePermsModalTitle -Compress), rolePermsHtml: $(ConvertTo-Json $rolePermItems -Compress), riskTitle: $(ConvertTo-Json $riskModalTitle -Compress), riskHtml: $(ConvertTo-Json $riskFactorsHtml -Compress), certsTitle: $(ConvertTo-Json $certsModalTitle -Compress), certsHtml: $(ConvertTo-Json $certsModalHtml -Compress), secretsTitle: $(ConvertTo-Json $secretsModalTitle -Compress), secretsHtml: $(ConvertTo-Json $secretsModalHtml -Compress), expiringTitle: $(ConvertTo-Json $expiringModalTitle -Compress), expiringHtml: $(ConvertTo-Json $expiringModalHtml -Compress), expiredTitle: $(ConvertTo-Json $expiredModalTitle -Compress), expiredHtml: $(ConvertTo-Json $expiredModalHtml -Compress), ownershipTitle: $(ConvertTo-Json $ownershipModalTitle -Compress), ownershipHtml: $(ConvertTo-Json $ownershipModalHtml -Compress), ownersTitle: $(ConvertTo-Json $ownersModalTitle -Compress), ownersHtml: $(ConvertTo-Json $ownersModalHtml -Compress), ownershipGapTitle: $(ConvertTo-Json $ownershipGapModalTitle -Compress), ownershipGapHtml: $(ConvertTo-Json $ownershipGapModalHtml -Compress) }")
+    $modalDataEntries.Add("`"$safeKey`": { appPermsTitle: $(ConvertTo-Json $appPermsModalTitle -Compress), appPermsHtml: $(ConvertTo-Json $appPermItems -Compress), delegatedPermsTitle: $(ConvertTo-Json $delegatedPermsModalTitle -Compress), delegatedPermsHtml: $(ConvertTo-Json $delegatedPermItems -Compress), rolePermsTitle: $(ConvertTo-Json $rolePermsModalTitle -Compress), rolePermsHtml: $(ConvertTo-Json $rolePermItems -Compress), riskTitle: $(ConvertTo-Json $riskModalTitle -Compress), riskHtml: $(ConvertTo-Json $riskFactorsHtml -Compress), certsTitle: $(ConvertTo-Json $certsModalTitle -Compress), certsHtml: $(ConvertTo-Json $certsModalHtml -Compress), secretsTitle: $(ConvertTo-Json $secretsModalTitle -Compress), secretsHtml: $(ConvertTo-Json $secretsModalHtml -Compress), ficTitle: $(ConvertTo-Json $ficModalTitle -Compress), ficHtml: $(ConvertTo-Json $ficModalHtml -Compress), expiringTitle: $(ConvertTo-Json $expiringModalTitle -Compress), expiringHtml: $(ConvertTo-Json $expiringModalHtml -Compress), expiredTitle: $(ConvertTo-Json $expiredModalTitle -Compress), expiredHtml: $(ConvertTo-Json $expiredModalHtml -Compress), ownershipTitle: $(ConvertTo-Json $ownershipModalTitle -Compress), ownershipHtml: $(ConvertTo-Json $ownershipModalHtml -Compress), appProxyPreAuthTitle: $(ConvertTo-Json $appProxyPreAuthTitle -Compress), appProxyPreAuthHtml: $(ConvertTo-Json $appProxyPreAuthHtml -Compress), ownersTitle: $(ConvertTo-Json $ownersModalTitle -Compress), ownersHtml: $(ConvertTo-Json $ownersModalHtml -Compress), ownershipGapTitle: $(ConvertTo-Json $ownershipGapModalTitle -Compress), ownershipGapHtml: $(ConvertTo-Json $ownershipGapModalHtml -Compress) }")
     $html += @"
-            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$($app.AppId)" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hasspcreds="$(if ($app.HasServicePrincipalCredentials) { 'yes' } else { 'no' })" data-hasadminconsent="$(if ($hasAdminConsentDelegated) { 'yes' } else { 'no' })" data-hasuserconsent="$(if ($hasUserConsentDelegated) { 'yes' } else { 'no' })" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-expiring="$expiringValue" data-expired="$expiredValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
+            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$safeAppId" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hasspcreds="$(if ($app.HasServicePrincipalCredentials) { 'yes' } else { 'no' })" data-hasadminconsent="$(if ($hasAdminConsentDelegated) { 'yes' } else { 'no' })" data-hasuserconsent="$(if ($hasUserConsentDelegated) { 'yes' } else { 'no' })" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-hasfederated="$(if ($app.FederatedCredentials -gt 0) { 'yes' } else { 'no' })" data-expiring="$expiringValue" data-expired="$expiredValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-apptype="$($app.AppType)" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
                 <td><a class="app-name" href="$portalUrl" target="_blank" title="Open in Entra portal">$safeDisplayName</a></td>
                 <td class="$enabledClass">$enabledText</td>
-                <td><code class="mono">$($app.AppId)</code></td>
+                <td><code class="mono">$safeAppId</code></td>
+                <td class="$appTypeClass">$appTypeText</td>
                 <td class="$ownershipClass">$ownershipText</td>
                 <td class="$appRegClass">$appRegText</td>
                 <td class="$assignmentRequiredClass">$assignmentRequiredText</td>
                 <td class="$ownersClass cell-sm"><span class="perm-badges">$ownersText</span></td>
                 <td class="cell-sm">$riskBadge</td>
                 <td class="cell-sm"><span class="perm-badges">$permissionSummary</span></td>
-                <td class="cell-sm"><span class="perm-badges">$certsBadge $secretsBadge$(if ($expiringBadgeHtml) { " $expiringBadgeHtml" })$(if ($expiredBadgeHtml) { " $expiredBadgeHtml" })</span></td>
+                <td class="cell-sm"><span class="perm-badges">$secretsBadge $certsBadge $ficBadge$(if ($expiringBadgeHtml) { " $expiringBadgeHtml" })$(if ($expiredBadgeHtml) { " $expiredBadgeHtml" })</span></td>
             </tr>
 "@
 }
@@ -2512,17 +2699,18 @@ $html += @"
         // Active filters: group -> Set of selected values (OR within a group, AND across groups)
         const activeFilters = {};
         const groupLabels = {
-            ownership: 'Ownership', risk: 'Risk', appreg: 'App Reg',
+            ownership: 'Ownership', risk: 'Risk', appreg: 'App Reg', apptype: 'App Type',
             assignment: 'Assignment', owners: 'Owners', permissions: 'Permissions', consent: 'Consent', credentials: 'Credentials', enabled: 'Enabled', publisher: 'Publisher'
         };
         const valueLabels = {
             internal: 'Internal', external: 'External', microsoft: 'Microsoft', 'third-party': 'Third-Party',
+            enterprise: 'Enterprise Application', appproxy: 'App Proxy', blueprint: 'Agent Blueprint',
             Critical: 'Critical', High: 'High', Medium: 'Medium', Low: 'Low',
             yes: 'Yes', no: 'No',
             required: 'Required', 'not-required': 'Open Access',
             has: 'Has Owners', noowners: 'No Owners', gap: 'Ownership Gap',
             application: 'Application', delegated: 'Delegated', roles: 'Roles', 'sp-creds': 'Has SP Credentials', none: 'None',
-            certs: 'Has Certs', secrets: 'Has Secrets', expiring: 'Expiring', expired: 'Expired',
+            certs: 'Has Certs', secrets: 'Has Secrets', federated: 'Has Federated', expiring: 'Expiring', expired: 'Expired',
             verified: 'Verified', unverified: 'Unverified',
             admin: 'Admin Consent', user: 'User Consent'
         };
@@ -2530,6 +2718,7 @@ $html += @"
         function rowMatchesTag(row, group, value) {
             switch (group) {
                 case 'ownership':   return row.dataset.ownership === value;
+                case 'apptype':     return row.dataset.apptype === value;
                 case 'publisher':
                     if (value === 'verified')   return row.dataset.verifiedpublisher === 'verified';
                     if (value === 'unverified') return row.dataset.verifiedpublisher === 'unverified';
@@ -2543,11 +2732,12 @@ $html += @"
                     if (value === 'gap')      return row.dataset.ownershipgap === 'yes';
                     return false;
                 case 'credentials':
-                    if (value === 'certs')    return row.dataset.hascerts === 'yes';
-                    if (value === 'secrets')  return row.dataset.hassecrets === 'yes';
-                    if (value === 'sp-creds') return row.dataset.hasspcreds === 'yes';
-                    if (value === 'expiring') return row.dataset.expiring === 'yes';
-                    if (value === 'expired')  return row.dataset.expired  === 'yes';
+                    if (value === 'certs')     return row.dataset.hascerts === 'yes';
+                    if (value === 'secrets')   return row.dataset.hassecrets === 'yes';
+                    if (value === 'federated') return row.dataset.hasfederated === 'yes';
+                    if (value === 'sp-creds')  return row.dataset.hasspcreds === 'yes';
+                    if (value === 'expiring')  return row.dataset.expiring === 'yes';
+                    if (value === 'expired')   return row.dataset.expired  === 'yes';
                     return false;
                 case 'enabled':     return row.dataset.enabled === value;
                 case 'permissions': {

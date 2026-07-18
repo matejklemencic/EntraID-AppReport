@@ -1,30 +1,67 @@
 # Entra ID App Report
 
-Generates an interactive, self-contained HTML security report for all Enterprise Applications (Service Principals) in a Microsoft Entra ID tenant. Designed for security reviews, governance audits, and weekly automated reporting via Azure DevOps.
+Generates an interactive, self-contained HTML security report for every Enterprise Application (Service Principal) in a Microsoft Entra ID tenant — including standard Enterprise Applications, on-premises apps published via Application Proxy, and Microsoft Entra Agent ID blueprint principals. Designed for security reviews, governance audits, GDAP-style multi-tenant sweeps (run it once per customer tenant with `-TenantId`), and weekly automated reporting via Azure DevOps.
+
+## Acknowledgments
+
+Every permission shown in this report links out to [Merill Fernando](https://github.com/merill)'s excellent **[Graph Permissions Explorer](https://graphpermissions.merill.net/permission/)** ([source](https://github.com/merill/graph-permissions-explorer)) — a community resource that documents what every single Microsoft Graph permission actually does, at a level of detail Microsoft's own docs often don't reach. This report leans on it heavily so a reviewer can go from "what is `RoleManagement.ReadWrite.Directory`?" to a real answer in one click. If you find this report useful, go say thanks to Merill for the tool that makes half of it legible.
 
 ## What it does
 
-The script connects to Microsoft Graph, retrieves every Enterprise Application registered or consented to in the tenant, and analyses each one across several dimensions:
+The script connects to Microsoft Graph, retrieves every Enterprise Application registered or consented to in the tenant, and analyzes each one across several dimensions:
 
 - **Permissions**: application permissions (app roles) and delegated permissions (OAuth2 grants), including the resource they are granted against
 - **Consent type**: each delegated permission is tagged as tenant-wide **Admin Consent** or self-service **User Consent**, with a per-user consent count shown for user-consented permissions (mirroring the Entra portal's Permissions > User consent view)
 - **Directory roles**: Entra ID directory roles assigned directly to the service principal
 - **Ownership**: owners on both the Service Principal and its backing App Registration, with gap detection when the two ownership sets diverge; owners are tracked separately for the Enterprise App and the App Registration
-- **Credentials**: active certificates and client secrets on the App Registration counted separately, including expiry detection within 30 days, already-expired credential detection, and long-lived credential detection
+- **Credentials**: three credential types, tracked and shown separately:
+  - **Certificates** and **client secrets** on the App Registration (and, when present, added directly to the Service Principal) — with expiry detection within 30 days, already-expired detection, and long-lived credential detection (> 1 year)
+  - **Federated Identity Credentials (FIC)** — Microsoft's recommended, secretless alternative to client secrets. Unlike certs and secrets, FIC has no expiry concept by design (no `StartDateTime`/`EndDateTime`), so it's tracked and shown separately from the expiry-aware credential tables
 - **Publisher verification**: whether a third-party (external) app has a Microsoft-verified publisher
+- **App Type classification**: every row is classified as one of three types (see [App Type classification](#app-type-classification) below) — independent of who published the app
 - **High-value target apps**: flags well-known first-party admin/automation apps (Azure CLI, Azure/Azure AD PowerShell, Exchange Online PowerShell, Microsoft Graph CLI/PowerShell) that are open to all users
-- **Risk scoring**: a weighted score per app based on the above signals, producing a Critical / High / Medium / Low classification
+- **Risk scoring**: a weighted score per app based on the above signals, producing a Critical / High / Medium / Low classification — see [Risk scoring](#risk-scoring)
 - **Governance signals**: whether assignment is required, whether the app is enabled or disabled, whether it is internal, Microsoft-owned, or third-party
 
 The output is a single `.html` file that works offline with no external dependencies and no server required.
+
+## App Type classification
+
+Every row is classified as exactly one of three types, detected independently of App Ownership (App Ownership answers "who published this app"; App Type answers "what kind of object is this"). A third-party Agent Blueprint is entirely possible and shows correctly as both `App Type = Agent Blueprint` and `App Ownership = Third-Party` — two independent, separately filterable signals, never a combined badge.
+
+| App Type | Detection | Notes |
+|----------|-----------|-------|
+| **Enterprise Application** (default) | Anything that isn't one of the two types below | A standard registered application instance |
+| **App Proxy** | Service Principal has the `WindowsAzureActiveDirectoryOnPremApp` tag | An on-premises application published via Microsoft Entra Application Proxy for secure remote access without a VPN. See [App Proxy-specific behavior](#app-proxy-specific-behavior) below |
+| **Agent Blueprint** | Service Principal's `@odata.type` is `#microsoft.graph.agentIdentityBlueprintPrincipal` | A Microsoft Entra Agent ID blueprint — a template defining an AI agent identity configuration that can be instantiated into multiple agent identities inheriting its permissions. See [Agent Blueprint-specific behavior](#agent-blueprint-specific-behavior) below |
+
+This classification does not affect risk scoring directly — it's a display/filter feature. What *does* change based on App Type is some of the **wording** shown in risk factors and modals (below), because the security implications of certain signals genuinely differ for a blueprint or an App Proxy app.
+
+### Agent Blueprint-specific behavior
+
+A blueprint credential (certificate, secret, or federated credential) can authenticate as *any* agent identity or agent user instantiated from that blueprint — not just the blueprint object itself. Several places in the report reflect this:
+
+- **Assignment Required banner** (Risk Analysis modal): for a blueprint, the "Assignment Required doesn't restrict Application permissions or Directory Roles" note is reworded to explain that anyone holding one of the blueprint's credentials can act as any agent identity or agent user created from it — a materially larger blast radius than the same note on a regular app.
+- **"Assignment not required" risk factor**: for a blueprint, the factor text reads "open to any authenticated principal" instead of "open to all users," since blueprint access isn't necessarily scoped to interactive human sign-in the same way an Enterprise Application's is.
+- **Owners modal**: the banner text is blueprint-aware —
+  - If the blueprint has a local App Registration: explains that credentials can only be added/rotated through the App Registration side, never directly to the blueprint principal, agent identities, or agent users.
+  - If it's a **third-party blueprint with no local App Registration**: explains that its credentials are managed entirely in the publishing tenant, and no local owner can add, rotate, or view them.
+
+None of this changes the underlying `Points` value of any risk factor — only the explanatory text and, where relevant, the linked Microsoft Learn article change.
+
+### App Proxy-specific behavior
+
+- **"Verify Pre-Auth" badge**: shown next to the Assignment Required Yes/No badge for every App Proxy app. Application Proxy has a Pre-Authentication setting (**Microsoft Entra ID** vs **Passthrough**) that determines whether Entra authenticates the user and enforces Conditional Access before traffic reaches the on-premises app, or whether authentication is bypassed entirely. The underlying Graph property for this (`onPremisesPublishing.externalAuthenticationType`) is beta-only, so rather than add a beta Graph dependency or guess, the report surfaces a dedicated informational modal explaining the two modes and exactly where to check the setting manually in the Entra admin center. This badge carries no score — it's a nudge to go verify a setting the report cannot read.
+- **Legacy `CWAP_AuthSecret` hint**: if an App Proxy app still has a credential literally named `CWAP_AuthSecret`, a small info icon appears next to it in the Certificates/Secrets/Expiring/Expired modals, linking to the official Application Proxy FAQ. Application Proxy no longer relies on this legacy secret (replaced by Federated Identity Credentials for apps using Entra pre-authentication), so an existing `CWAP_AuthSecret` is safe to ignore or clean up — the hint is purely informational and does not change how the credential is counted, scored, or filtered.
 
 ## Report features
 
 | Feature | Detail |
 |---------|--------|
+| App Type | Classifies each row as Enterprise Application, App Proxy, or Agent Blueprint. Independent from App Ownership — a blueprint or App Proxy app can be internal, Microsoft, or third-party. |
 | Summary cards | Clickable cards for total apps, risk levels, ownership type, unverified publishers, expiring credentials, ownership gaps, and disabled apps, each filtering the table |
 | Search | Debounced real-time text search across application name, App ID, owner, and permission |
-| Filter panel | Multi-dimensional filter tags for enabled state, ownership, publisher verification, App Registration, assignment, owners, risk, permissions, consent type, and credentials |
+| Filter panel | Multi-dimensional filter tags for enabled state, App Type, ownership, publisher verification, App Registration, assignment, owners, risk, permissions, consent type, and credentials |
 | Column sort | Click any sortable column header to sort ascending; click again to reverse |
 | Export CSV | Downloads the currently visible (filtered) rows as a `.csv` file, UTF-8 with BOM for correct Excel rendering |
 | Dark / light mode | Toggle persisted to `localStorage`; a GitHub repo link icon sits next to the toggle in the header |
@@ -38,21 +75,24 @@ The output is a single `.html` file that works offline with no external dependen
 
 ## Interactive badges
 
-Most badges in the report table are clickable and open a detail modal with additional information. Badges that only act as filters (Enabled, App Registration, Assignment Required) are not modal triggers. Modal tables (Certificates, Secrets, Expiring, Expired, and Owners) are sortable — click any column header to sort ascending, click again to reverse.
+Most badges in the report table are clickable and open a detail modal with additional information. Badges that only act as filters (Enabled, App Registration, Assignment Required Yes/No, App Type) are not modal triggers themselves, though the Assignment Required column can carry additional clickable sub-badges (Partial Mitigation, Verify Pre-Auth) that do open modals. Modal tables (Certificates, Secrets, Federated, Expiring, Expired, and Owners) are sortable — click any column header to sort ascending, click again to reverse.
 
 | Column | Badge | Modal content |
 |--------|-------|---------------|
 | App Ownership | Internal / Microsoft / Third-Party | Ownership type, publisher verification (third-party only), and owner tenant ID |
 | App Ownership | Verified Publisher / Unverified Publisher | Shown under the Third-Party badge only. Opens the same App Ownership modal as the Third-Party badge |
+| Assignment Required | Partial Mitigation | Shown when Assignment Required = Yes but the app also has Application permissions or Directory Roles. Opens the Risk Analysis modal, since those permission types aren't restricted by Assignment Required at all — explained in more detail in [Risk scoring](#risk-scoring) |
+| Assignment Required | Verify Pre-Auth | App Proxy apps only. Opens a dedicated modal explaining the Microsoft Entra ID vs Passthrough Pre-Authentication modes and how to check which one is configured — see [App Proxy-specific behavior](#app-proxy-specific-behavior) |
 | Permissions | App: N | Full list of application permissions with resource; each permission links to the Graph Permissions Explorer |
 | Permissions | Delegated: N | Full list of delegated permissions with resource; each permission links to the Graph Permissions Explorer. Each entry also shows a consent badge — **Admin Consent** (tenant-wide) or **N user(s) consented** (self-service) — that filters the table by consent type when clicked |
 | Permissions | Roles: N | Full list of directory roles assigned to the service principal; each role links to the Microsoft Learn built-in roles reference |
-| Risk | Critical / High / Medium / Low | A score header (large point total plus the risk-level badge) followed by every contributing signal, sorted highest-to-lowest with individual point values, and a visual threshold scale bar showing where the score falls between Low/Medium/High/Critical; permission factors link to the Graph Permissions Explorer, directory-role factors link to Microsoft Learn, the two "Assignment not required" factors and the unverified-publisher factor link to the relevant Microsoft Learn article, and some factors carry a hover tooltip (rendered as a small info icon) with extra guidance. For disabled apps, the badge and gauge are shown in muted grey with a banner explaining the score reflects inherent risk only |
+| Risk | Critical / High / Medium / Low | A score header (large point total plus the risk-level badge) followed by every contributing signal, sorted highest-to-lowest with individual point values, and a visual threshold scale bar showing where the score falls between Low/Medium/High/Critical; permission factors link to the Graph Permissions Explorer, directory-role factors link to Microsoft Learn, several factors link to the relevant Microsoft Learn article, and some factors carry a hover tooltip (rendered as a small info icon) with extra guidance. For disabled apps, the badge and gauge are shown in muted grey with a banner explaining the score reflects inherent risk only |
 | Credentials | Certs: N | Sortable table of each active certificate: display name, valid from, expiry date (highlighted if expiring/expired), and Key ID |
-| Credentials | Secrets: N | Sortable table of each active client secret: display name, created date, expiry date (highlighted if expiring/expired), and Key ID |
-| Credentials | Expiring: N | Sortable table of only the certificates/secrets expiring within 30 days, across both types |
+| Credentials | Secrets: N | Sortable table of each active client secret: display name, created date, expiry date (highlighted if expiring/expired), and Key ID. App Proxy apps get an inline hint icon next to any secret literally named `CWAP_AuthSecret` — see [App Proxy-specific behavior](#app-proxy-specific-behavior) |
+| Credentials | Federated: N | Sortable table of each Federated Identity Credential: name, issuer, and subject. FIC has no expiry, so it never appears in the Expiring/Expired tables — this is its own dedicated modal. Filterable via the filter panel's "Has Federated" tag in the Credentials group |
+| Credentials | Expiring: N | Sortable table of only the certificates/secrets expiring within 30 days, across both types (FIC excluded — it doesn't expire) |
 | Credentials | Expired: N | Sortable table of only the certificates/secrets that have already expired, across both types |
-| Owners | N owner(s) | Sortable table of all owners with their coverage (Enterprise App, App Registration, or both) |
+| Owners | N owner(s) | Sortable table of all owners with their coverage (Enterprise App, App Registration, or both). Wording differs for Agent Blueprints — see [Agent Blueprint-specific behavior](#agent-blueprint-specific-behavior) |
 | Owners | Ownership Gap | Owners that are not assigned to both the Service Principal and the App Registration |
 | Owners | No owners | Plain badge — no modal |
 
@@ -91,10 +131,12 @@ The identity used to run the script (user, service principal, or managed identit
 
 | Permission | Purpose |
 |------------|---------|
-| `Application.Read.All` | Read service principals and app registrations |
+| `Application.Read.All` | Read service principals, app registrations, and their Federated Identity Credentials (FIC is read as part of the Application resource — no separate scope is required) |
 | `Directory.Read.All` | Read directory objects and owners |
 | `DelegatedPermissionGrant.Read.All` | Read OAuth2 delegated permission grants |
 | `RoleManagement.Read.Directory` | Read directory role assignments |
+
+No additional or beta scope is needed for App Type detection or FIC — both are read from properties already covered by `Application.Read.All` and `Directory.Read.All` using the same restricted `-Property` selects the script already uses elsewhere.
 
 For **interactive (user) runs**, these are requested as delegated scopes during the sign-in browser prompt.
 
@@ -103,7 +145,7 @@ For **interactive (user) runs**, these are requested as delegated scopes during 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `-OutputPath` | String | Auto-generated | Path for the HTML report. Defaults to `EntraIDAppReport__{TenantName}_{Date}.html` in the current directory. |
-| `-TenantId` | String | None | Entra ID tenant ID. Required for Service Principal authentication. Used when targeting a specific tenant. |
+| `-TenantId` | String | None | Entra ID tenant ID. Required for Service Principal authentication. Used when targeting a specific tenant — e.g. running once per customer tenant in a GDAP/multi-tenant scenario. |
 | `-AccessToken` | SecureString | None | Pre-acquired Microsoft Graph token. Used in Azure DevOps pipelines via `Get-AzAccessToken`. |
 | `-ClientId` | String | None | App (client) ID for Service Principal authentication. Must be combined with `-CertificateThumbprint` and `-TenantId`, or with `-UseManagedIdentity` to select a user-assigned Managed Identity. Supplying it with neither is a validation error. |
 | `-CertificateThumbprint` | String | None | Certificate thumbprint for Service Principal authentication. Requires `-ClientId`. |
@@ -129,7 +171,7 @@ A browser window opens for Microsoft sign-in. The report is saved to the current
 
 ### Interactive sign-in for a specific tenant
 
-Use this when you need to target a specific Entra ID tenant:
+Use this when you need to target a specific Entra ID tenant — including running the same command once per customer tenant under GDAP:
 
 ```powershell
 .\Get-EntraIDAppReport.ps1 -TenantId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -188,7 +230,7 @@ The certificate must be installed in the current user's or local machine's certi
 
 ## Risk scoring
 
-Every app receives a numeric risk score. The score drives the **Critical / High / Medium / Low** classification shown in the report.
+Every app receives a numeric risk score. The score drives the **Critical / High / Medium / Low** classification shown in the report. App Type never contributes to the score directly — see [App Type classification](#app-type-classification) for the (score-neutral) wording differences that do apply for blueprints and App Proxy apps.
 
 ### Thresholds
 
@@ -205,14 +247,14 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 |--------|--------|
 | High-value app open to all users (assignment not required) — Azure CLI, Azure/Azure AD PowerShell, Exchange PowerShell, Graph CLI/PowerShell | +50 |
 | Each unique high-risk directory role (e.g. Global Administrator, Security Administrator) | +15 |
-| Each unique high-risk permission (e.g. `Directory.ReadWrite.All`, `Directory.Read.All`, `User.ReadWrite.All`) | +15 |
+| Each unique high-risk permission (e.g. `Directory.ReadWrite.All`, `User.ReadWrite.All`, `RoleManagement.ReadWrite.Directory`) | +15 |
 | Credential added directly to the Service Principal instead of the App Registration | +10 |
-| Each unique medium-risk permission (e.g. `User.Read.All`, `Mail.Send`) | +5 |
+| Each unique medium-risk permission (e.g. `User.Read.All`, `Mail.Send`, `Sites.ReadWrite.All`) | +5 |
 | Each other directory role | +5 |
 | Has any application permissions (bonus, counted once) | +5 |
 | Sensitive permission granted via Admin Consent, tenant-wide (all users exposed) | +5 |
-| Assignment not required (open access, non high-value app) | +5 |
-| Uses password secrets instead of certificates | +5 |
+| Assignment not required, and the app has at least one delegated permission (open access, non high-value app) | +5 |
+| Uses client secrets instead of certificates or a federated identity credential | +5 |
 | Multiple secrets configured | +5 |
 | Long-lived credentials (expiry > 1 year) | +5 |
 | External application (registered in another tenant, not Microsoft) | +5 |
@@ -223,10 +265,14 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 Notes:
 
 - The high-value factor (+50) and the generic "assignment not required" factor (+5) are mutually exclusive — a high-value app records only the single higher factor.
+- The generic "assignment not required" +5 factor only fires when the app has at least one delegated permission — Assignment Required governs delegated/interactive sign-in access, not Application permissions or Directory Roles (see the Partial Mitigation badge), so an app with zero delegated permissions has no delegated attack surface for this factor to describe. The high-value-app +50 factor is the one exception: it fires regardless of delegated permission count, since that risk is about the open sign-in flow itself being a phishing/token-theft vector, independent of currently-recorded permissions.
 - An external, unverified third-party app accumulates both the external (+5) and unverified-publisher (+5) factors.
 - The Admin Consent (+5) and User Consent (+3) factors are independent and can both apply to the same app if it has some permissions consented tenant-wide and others consented individually by users.
 - Ownership state (no owners, owners on only one side, ownership gaps) is surfaced in the report via the Owners column, badges, and filters, but is intentionally **not** scored — missing or mismatched ownership is treated as a governance signal, not a security risk factor.
 - Disabled apps keep their full inherent score and are not counted differently in scoring — the disabled state is shown only as a modal banner and muted color, not as a scoring factor. See [Disabled app handling](#disabled-app-handling).
+- Federated Identity Credentials do not themselves add or remove points — they simply don't trigger the "uses client secrets" factor the way a password secret does, since FIC is the credential type Microsoft recommends over both secrets and (in many scenarios) certificates.
+
+The High-risk and Medium-risk permission lists were substantially expanded (from 31/8 entries to 85/121) following a manual audit of the full Microsoft Graph permission catalog, covering permission families such as Policy, RoleManagement, PrivilegedAccess, DeviceManagement\*, security/detection tooling, compliance/eDiscovery, tenant-wide configuration, and GDAP/multi-tenant management permissions. Point values are unchanged (High +15, Medium +5) — only list coverage grew. The full lists live in the script's `$riskConfig` hashtable (`HighRiskPermissions` / `MediumRiskPermissions`) — that's the source of truth; they're not reproduced in full here given their length. Permissions not on either list are not individually scored; application permissions still receive the flat "has application permissions" +5 bonus regardless of which specific permissions they are.
 
 ### High-value target apps
 
