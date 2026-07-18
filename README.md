@@ -344,13 +344,25 @@ The included `azure-pipelines.yml` automates weekly report generation using a fe
 
 > **Token lifetime:** the Graph token obtained via the service connection is valid for roughly an hour and cannot be refreshed mid-run. To stay well within that window on large tenants, full-tenant scans bulk pre-fetch app registrations, OAuth2 permission grants, and directory role assignments as a handful of paged enumerations instead of several Graph calls per application.
 
+### Import the repository into Azure DevOps
+
+The pipeline needs the code sitting in an ADO Git repo (it can't run directly against the GitHub repo). ADO can import it in one step, no local clone or manual file copying required:
+
+1. In your ADO project: **Repos → Files**, then click **Import** (on a brand-new empty repo you'll see an **Import a repository** button instead).
+2. **Clone URL**: `https://github.com/matejklemencic/EntraID-AppReport`. Leave **Requires authorization** unchecked, this repo is public.
+3. Click **Import**. ADO clones the repository, including full history, into your ADO repo.
+
+Once imported, `azure-pipelines.yml` is already in the repo root, so creating the pipeline in the setup steps below just points at it: **Pipelines → New pipeline → Azure Repos Git → select the repo → Existing Azure Pipelines YAML file → `/azure-pipelines.yml`**.
+
+> To pick up upstream updates later, re-run the import (it overwrites the ADO repo with the GitHub source) or add the GitHub repo as a second remote and pull from it manually.
+
 ### Setup steps
 
 **1. Create an Azure service connection in ADO**
 
 In your ADO project: **Project Settings → Service Connections → New service connection → Azure Resource Manager**.
 
-Select **Workload Identity Federation** as the authentication method. The `AzurePowerShell@5` task requires the service connection's service principal to have at least the **Reader** role on the selected Azure subscription; without it, the task cannot initialize the Az context to obtain a Graph access token. In addition to that subscription role, the service principal also needs the Entra ID Graph permissions below.
+Select **Workload Identity Federation** as the authentication method, with **automatic** app registration, and pick the subscription to scope the connection to. With the automatic option, ADO creates the app registration and assigns it the **Reader** role on that subscription for you, no manual role assignment needed. (The `AzurePowerShell@5` task requires this Reader role to initialize the Az context and obtain a Graph access token, so if you instead point the connection at an existing/manually-created service principal, you'll need to grant it Reader on the subscription yourself.) The service principal still needs the Entra ID Graph permissions below, which are not granted automatically.
 
 **2. Grant the service principal Graph permissions**
 
