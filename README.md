@@ -362,11 +362,11 @@ Once imported, `azure-pipelines.yml` is already in the repo root, so creating th
 
 In your ADO project: **Project Settings → Service Connections → New service connection → Azure Resource Manager**.
 
-Select **Workload Identity Federation** as the authentication method, with **automatic** app registration, and pick the subscription to scope the connection to. The service principal needs the Entra ID Graph permissions below, which are not granted automatically.
+Select **Workload Identity Federation** as the authentication method, with **automatic** app registration, and pick the subscription to scope the connection to. The service principal needs the Entra ID Graph permissions below, which are not granted automatically. On the last wizard screen, checking **Grant access permission to all pipelines** lets any pipeline in the project use the connection immediately; leaving it unchecked is more restrictive but means the first run of this pipeline pauses waiting for a human to approve it (see step 5).
 
 **2. Grant the service principal Graph permissions**
 
-Find the service principal created for your service connection in Entra ID (**App registrations** or **Enterprise applications**) and add these **Application permissions** with admin consent:
+Find the service principal created for your service connection in Entra ID (**App registrations**) and add these **Application permissions** with admin consent:
 
 - `Application.Read.All`
 - `Directory.Read.All`
@@ -375,15 +375,23 @@ Find the service principal created for your service connection in Entra ID (**Ap
 
 **3. Update the pipeline file**
 
-Edit `azure-pipelines.yml` and set `azureSubscription` to the name of your service connection:
+Edit `azure-pipelines.yml` and set `azureSubscription` to the name of your service connection, then commit and push the change to `main` (a local edit only takes effect once it reaches the ADO repo):
 
 ```yaml
 azureSubscription: "Your-Service-Connection-Name"
 ```
 
-**4. Run or schedule**
+**4. Create the pipeline in ADO**
+
+If you haven't already: **Pipelines → New pipeline → Azure Repos Git → select the repo → Existing Azure Pipelines YAML file → `/azure-pipelines.yml`** → **Save** (or **Save and run**). This registers the pipeline against the YAML file already sitting in the repo; it doesn't need to be created again after that.
+
+**5. Run or schedule**
 
 Push to `main` to trigger immediately, or let the Monday schedule run automatically. The report artifact is available under the pipeline run's **Artifacts** tab.
+
+> **First-run authorization:** if the service connection wasn't granted access to all pipelines in step 1, the first run pauses with a **"This pipeline needs permission to access a resource"** banner. Open the run and click **Permit** (or approve it from **Project Settings → Service Connections → *your connection* → Security**); this is a one-time approval per pipeline/connection pair.
+
+> **Hosted agent parallelism:** the pipeline runs on a Microsoft-hosted agent (`vmImage: ubuntu-24.04`). New ADO organizations often start with 0 free hosted parallel jobs, so the run queues indefinitely until parallelism is enabled. Fix it by linking an Azure subscription for billing under **Organization Settings → Billing**, which auto-grants the free tier (1 parallel job / 1,800 minutes per month); if you'd rather not link billing, the legacy [request form](https://aka.ms/azpipelines-parallelism-request) grants it manually but can take days to be reviewed. If a run seems permanently stuck in **Queued**, this is almost always the cause.
 
 ### Schedule
 
