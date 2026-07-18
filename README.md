@@ -337,7 +337,7 @@ The included `azure-pipelines.yml` automates weekly report generation using a fe
 
 1. The pipeline runs on a schedule (every Monday at 06:00 UTC) and on every push to `main`.
 2. The required Microsoft Graph modules are restored from a pipeline cache (`Cache@2`). On the first run (or after a cache key change) they are downloaded once with `Save-PSResource`, much faster than `Install-Module`, and saved back to the cache; subsequent runs skip installation entirely.
-3. The `AzurePowerShell@5` task authenticates using the ADO service connection (`azureSubscription`). The service connection uses **Workload Identity Federation**. The Azure service principal behind it needs **Reader** on the connection's Azure subscription (required by the task itself to initialize the Az context) plus the required Graph permissions. The task retries once on transient failures (`retryCountOnTaskFailure`).
+3. The `AzurePowerShell@5` task authenticates using the ADO service connection (`azureSubscription`). The service connection uses **Workload Identity Federation**. The task retries once on transient failures (`retryCountOnTaskFailure`).
 4. The task obtains a Graph access token from the authenticated Az context and passes it to the script via `-AccessToken`.
 5. The HTML report is saved to `$(Build.ArtifactStagingDirectory)` and published as a pipeline artifact named `EntraIDAppReport`.
 6. The run gets a **markdown summary tab** with the application and risk counts. If any Critical-risk apps are found, the script logs a pipeline warning and the run completes as **SucceededWithIssues** (orange), so findings are visible without opening the report. (These signals are emitted only when the script detects an ADO agent via `TF_BUILD`; local runs are unaffected.)
@@ -362,7 +362,7 @@ Once imported, `azure-pipelines.yml` is already in the repo root, so creating th
 
 In your ADO project: **Project Settings → Service Connections → New service connection → Azure Resource Manager**.
 
-Select **Workload Identity Federation** as the authentication method, with **automatic** app registration, and pick the subscription to scope the connection to. With the automatic option, ADO creates the app registration and assigns it the **Reader** role on that subscription for you, no manual role assignment needed. (The `AzurePowerShell@5` task requires this Reader role to initialize the Az context and obtain a Graph access token, so if you instead point the connection at an existing/manually-created service principal, you'll need to grant it Reader on the subscription yourself.) The service principal still needs the Entra ID Graph permissions below, which are not granted automatically.
+Select **Workload Identity Federation** as the authentication method, with **automatic** app registration, and pick the subscription to scope the connection to. The service principal needs the Entra ID Graph permissions below, which are not granted automatically.
 
 **2. Grant the service principal Graph permissions**
 
