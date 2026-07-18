@@ -1,12 +1,12 @@
 # Entra ID App Report
 
-Generates an interactive, self-contained HTML security report for every Enterprise Application (Service Principal) in a Microsoft Entra ID tenant, including standard Enterprise Applications, on-premises apps published via Application Proxy, and Microsoft Entra Agent ID blueprint principals. Designed for security reviews, governance audits, GDAP-style multi-tenant sweeps (run it once per customer tenant with `-TenantId`), and weekly automated reporting via Azure DevOps.
+Generates an interactive, self-contained HTML security report for every Enterprise Application (Service Principal) in a Microsoft Entra ID tenant, including standard Enterprise Applications, on-premises apps published via Application Proxy, and Microsoft Entra Agent ID blueprint principals. Designed for security reviews, governance audits, and weekly automated reporting via Azure DevOps.
 
 ![Entra ID App Report example screenshot](EntraIDAppReport_Example.png)
 
 ## Acknowledgments
 
-Every permission shown in this report links out to [Merill Fernando](https://github.com/merill)'s excellent **[Graph Permissions Explorer](https://graphpermissions.merill.net/permission/)** ([source](https://github.com/merill/graph-permissions-explorer)), a community resource that documents what every single Microsoft Graph permission actually does, at a level of detail Microsoft's own docs often don't reach. This report leans on it heavily so a reviewer can go from "what is `RoleManagement.ReadWrite.Directory`?" to a real answer in one click. If you find this report useful, go say thanks to Merill for the tool that makes half of it legible.
+Every permission in this report links directly to [Merill Fernando](https://github.com/merill)'s **[Graph Permissions Explorer](https://graphpermissions.merill.net/permission/)** ([source](https://github.com/merill/graph-permissions-explorer)), a community resource that documents what every single Microsoft Graph permission actually does, at a level of detail Microsoft's own docs often don't reach. Credit where it's due.
 
 ## What it does
 
