@@ -627,7 +627,7 @@ function Get-RiskScore {
     # This reflects a grant reviewed and approved by an administrator, exposed to every user.
     if ($TotalUsers -eq "All Users" -and ($uniqueHighRiskPerms.Count -gt 0 -or $uniqueMediumRiskPerms.Count -gt 0)) {
         $score += 5
-        $riskFactors += [PSCustomObject]@{ Text = "Sensitive permission granted via Admin Consent, tenant-wide (all users exposed)"; Points = 5 }
+        $riskFactors += [PSCustomObject]@{ Text = "Sensitive permission granted via Admin Consent, tenant-wide"; Points = 5 }
     }
 
     # Ungoverned consent: at least one sensitive delegated permission was granted via individual
