@@ -148,7 +148,7 @@ $ErrorActionPreference = 'Stop'
 if ($NonInteractive) { $ProgressPreference = 'SilentlyContinue' }
 
 # Script version — keep in sync with the .NOTES header above; surfaced in the report footer
-$ScriptVersion = 'V26.07.14'
+$ScriptVersion = 'V26.07.18'
 
 # Microsoft first-party tenant IDs — used to classify Microsoft-owned apps
 $script:MicrosoftTenantIds = @(
