@@ -10,7 +10,7 @@
 .AUTHOR
     Matej Klemencic (www.matej.guru)
 .NOTES
-    Version:        V26.07.14
+    Version:        V26.07.18
 
     Installation: Install the required Microsoft Graph modules (install each separately to use -MinimumVersion):
     @('Microsoft.Graph.Authentication','Microsoft.Graph.Applications','Microsoft.Graph.Identity.SignIns','Microsoft.Graph.Identity.DirectoryManagement','Microsoft.Graph.Identity.Governance','Microsoft.Graph.Users') | ForEach-Object { Install-Module $_ -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber }
