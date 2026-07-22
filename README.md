@@ -254,7 +254,7 @@ Every app receives a numeric risk score. The score drives the **Critical / High 
 | Each unique medium-risk permission (e.g. `User.Read.All`, `Mail.Send`, `Sites.ReadWrite.All`) | +5 |
 | Each other directory role | +5 |
 | Has any application permissions (bonus, counted once) | +5 |
-| Sensitive permission granted via Admin Consent, tenant-wide (all users exposed) | +5 |
+| Sensitive permission granted via Admin Consent, tenant-wide | +5 |
 | Assignment not required, and the app has at least one delegated permission (open access, non high-value app) | +5 |
 | Uses client secrets instead of certificates or a federated identity credential | +5 |
 | Multiple secrets configured | +5 |
