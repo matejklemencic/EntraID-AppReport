@@ -10,7 +10,7 @@
 .AUTHOR
     Matej Klemencic (www.matej.guru)
 .NOTES
-    Version:        V26.07.14
+    Version:        v26.07.22
 
     Installation: Install the required Microsoft Graph modules (install each separately to use -MinimumVersion):
     @('Microsoft.Graph.Authentication','Microsoft.Graph.Applications','Microsoft.Graph.Identity.SignIns','Microsoft.Graph.Identity.DirectoryManagement','Microsoft.Graph.Identity.Governance','Microsoft.Graph.Users') | ForEach-Object { Install-Module $_ -MinimumVersion '2.0.0' -Scope CurrentUser -AllowClobber }
@@ -148,7 +148,7 @@ $ErrorActionPreference = 'Stop'
 if ($NonInteractive) { $ProgressPreference = 'SilentlyContinue' }
 
 # Script version — keep in sync with the .NOTES header above; surfaced in the report footer
-$ScriptVersion = 'V26.07.14'
+$ScriptVersion = 'v26.07.22'
 
 # Microsoft first-party tenant IDs — used to classify Microsoft-owned apps
 $script:MicrosoftTenantIds = @(
@@ -893,15 +893,32 @@ function Get-ServicePrincipalPermissions {
         }
     }
     
-    # Calculate total permission count for filtering
-    $delegatedPermissionCount = 0
+    # Calculate total permission count for filtering.
+    # Delegated grants are per-consent-event (one AllPrincipals admin-consent grant per resource,
+    # plus one grant per individual user who consents) — the same scope can therefore appear in
+    # several grants. Group by (scope, resource) and count each unique permission once, regardless
+    # of how many consent grants (admin and/or however many users) cover it — matches how
+    # Get-RiskScore already dedupes permissions by name. The modal renders its own Admin
+    # Consent / "N users consented" badges independently from the same underlying grant data.
+    $delegatedGroupKeys = @{}
     foreach ($grant in $delegatedGrants) {
-        if ($grant.Scope) {
-            $scopes = $grant.Scope.Split(' ') | Where-Object { $_ -ne '' }
-            $delegatedPermissionCount += $scopes.Count
+        if (-not $grant.Scope) { continue }
+        $isAdminConsent = $grant.ConsentType -eq "AllPrincipals"
+        $scopes = $grant.Scope.Split(' ') | Where-Object { $_ -ne '' }
+        foreach ($scope in $scopes) {
+            $groupKey = "$scope|$($grant.ResourceId)"
+            if (-not $delegatedGroupKeys.ContainsKey($groupKey)) {
+                $delegatedGroupKeys[$groupKey] = @{ HasAdminConsent = $false; HasUserConsent = $false }
+            }
+            if ($isAdminConsent) {
+                $delegatedGroupKeys[$groupKey].HasAdminConsent = $true
+            } else {
+                $delegatedGroupKeys[$groupKey].HasUserConsent = $true
+            }
         }
     }
-    
+    $delegatedPermissionCount = $delegatedGroupKeys.Count
+
     $applicationPermissionCount = $appRoleAssignments.Count
     $directoryRoleCount = $roleAssignments.Count
     $totalPermissions = $delegatedPermissionCount + $applicationPermissionCount + $directoryRoleCount
@@ -1319,7 +1336,11 @@ foreach ($sp in $servicePrincipals) {
         VerifiedPublisherName = $verifiedPublisherName
         
         # Permissions
-        TotalPermissions = $permissions.Count
+        # TotalPermissions is the sum of the (deduped) component counts below, not a raw count of
+        # $permissions — that flattened list has one entry per individual consent grant/user and
+        # would over-count relative to what the badges and filters show. See DelegatedPermissionCount
+        # in Get-ServicePrincipalPermissions for the dedup logic.
+        TotalPermissions = $permissionInfo.ApplicationPermissionCount + $permissionInfo.DelegatedPermissionCount + $permissionInfo.DirectoryRoleCount
         ApplicationPermissions = $permissionInfo.ApplicationPermissionCount
         DelegatedPermissions = $permissionInfo.DelegatedPermissionCount
         DirectoryRoles = $permissionInfo.DirectoryRoleCount
@@ -2319,13 +2340,17 @@ foreach ($app in $sortedReport) {
         $safeResource = ConvertTo-HtmlSafe $group.Resource
         $urlPermName = ConvertTo-HtmlSafe ([Uri]::EscapeDataString($group.Permission))
         $permLink = "<a href='https://graphpermissions.merill.net/permission/$urlPermName' target='_blank' title='View $safePermName on Graph Permissions Explorer' style='color:inherit;text-decoration:underline dotted;'>$safePermName</a>"
+        # A permission can carry both admin consent AND separate individual user consent at the
+        # same time — show both badges rather than letting admin consent hide the user-consent one.
+        $consentBadges = ""
         if ($group.HasAdminConsent) {
-            $consentBadge = "<span class='badge orange' onclick=`"addFilter('consent','admin'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-right:6px' title='Tenant-wide grant, reviewed and approved by an administrator. Click to filter.'>Admin Consent</span>"
-        } else {
-            $userLabel = if ($group.UserConsentCount -eq 1) { "1 user" } else { "$($group.UserConsentCount) users" }
-            $consentBadge = "<span class='badge blue' onclick=`"addFilter('consent','user'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-right:6px' title='Granted by individual user consent, not reviewed by an administrator. Click to filter.'>$userLabel consented</span>"
+            $consentBadges += "<span class='badge orange' onclick=`"addFilter('consent','admin'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-right:6px' title='Tenant-wide grant, reviewed and approved by an administrator. Click to filter.'>Admin Consent</span>"
         }
-        $delegatedPermItems += "<div class='permission-item delegated-permission'>$consentBadge<strong>[Delegated]</strong> $permLink on <em>$safeResource</em></div>"
+        if ($group.UserConsentCount -gt 0) {
+            $userLabel = if ($group.UserConsentCount -eq 1) { "1 user" } else { "$($group.UserConsentCount) users" }
+            $consentBadges += "<span class='badge blue' onclick=`"addFilter('consent','user'); toggleFilterPanel(true); closeDetailModal();`" style='cursor:pointer;margin-right:6px' title='Granted by individual user consent, not reviewed by an administrator. Click to filter.'>$userLabel consented</span>"
+        }
+        $delegatedPermItems += "<div class='permission-item delegated-permission'>$consentBadges<strong>[Delegated]</strong> $permLink on <em>$safeResource</em></div>"
     }
 
     if (-not $appPermItems)       { $appPermItems       = "No application permissions assigned" }
