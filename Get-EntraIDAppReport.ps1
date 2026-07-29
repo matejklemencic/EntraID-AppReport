@@ -368,6 +368,57 @@ function ConvertTo-HtmlSafe {
     $Text.Replace('&','&amp;').Replace('<','&lt;').Replace('>','&gt;').Replace('"','&quot;').Replace("'",'&#39;')
 }
 
+# Some Graph objects (observed mainly on external/foreign service principals)
+# don't bind createdDateTime to the typed property; the SDK leaves it in
+# AdditionalProperties instead. This reads the typed property first and
+# falls back to the raw AdditionalProperties value before giving up.
+# The fallback is deliberately defensive: AdditionalProperties uses a
+# case-sensitive (Ordinal) key comparer, so the key is matched case-
+# insensitively, and the stored value can be a string, a JsonElement or an
+# already-typed DateTime/DateTimeOffset depending on SDK version.
+function Get-CreatedDateTimeSafe {
+    param($GraphObject)
+    if (-not $GraphObject) { return $null }
+
+    # 1. Typed property (the normal, working case)
+    if ($GraphObject.CreatedDateTime) { return [datetime]$GraphObject.CreatedDateTime }
+
+    # 2. Fallback: pull it out of AdditionalProperties
+    $ap = $GraphObject.AdditionalProperties
+    if (-not $ap) { return $null }
+
+    $raw = $null
+    try {
+        foreach ($k in $ap.Keys) {
+            if ($k -and $k.ToString().Equals('createdDateTime', [System.StringComparison]::OrdinalIgnoreCase)) {
+                $raw = $ap[$k]
+                break
+            }
+        }
+    }
+    catch {
+        Write-Verbose "Could not enumerate AdditionalProperties for createdDateTime: $($_.Exception.Message)"
+        return $null
+    }
+    if (-not $raw) { return $null }
+
+    # Already a date type (some SDK versions box it as DateTimeOffset)
+    if ($raw -is [datetime]) { return $raw }
+    if ($raw -is [System.DateTimeOffset]) { return $raw.UtcDateTime }
+
+    # Otherwise treat it as a string (covers String and JsonElement, whose
+    # ToString() yields the bare ISO-8601 value for a JSON string node).
+    $rawText = $raw.ToString().Trim('"', ' ')
+    if (-not $rawText) { return $null }
+    try {
+        return [DateTime]::Parse($rawText, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+    }
+    catch {
+        Write-Verbose "Could not parse createdDateTime from AdditionalProperties: '$rawText'"
+        return $null
+    }
+}
+
 # Build the Microsoft Learn deep link for an Entra built-in role.
 # The reference page uses GitHub-style anchors: role name lowercased, non-alphanumerics
 # dropped, and spaces collapsed to single hyphens (e.g. 'Global Administrator' -> '#global-administrator').
@@ -400,7 +451,7 @@ function Get-AppRegistrationCached {
     }
     $app = $null
     try {
-        $app = Get-MgApplication -Filter "appId eq '$AppId'" -Property 'Id,PasswordCredentials,KeyCredentials' -ErrorAction SilentlyContinue
+        $app = Get-MgApplication -Filter "appId eq '$AppId'" -Property 'Id,PasswordCredentials,KeyCredentials,CreatedDateTime' -ErrorAction SilentlyContinue
     }
     catch {
         Write-Verbose "Could not retrieve App Registration for AppId '$AppId': $($_.Exception.Message)"
@@ -996,20 +1047,22 @@ Write-Host "Gathering Enterprise Applications..." -ForegroundColor Green
 # Cache once — avoids repeated Get-MgContext calls inside loops
 $currentTenantId = (Get-MgContext).TenantId
 
-$servicePrincipalProperties = @(
-    "Id", "AppId", "DisplayName", "AppOwnerOrganizationId",
-    "ServicePrincipalType", "AppRoles", "Oauth2PermissionScopes", "SignInAudience",
-    "Tags", "AppDisplayName", "CreatedDateTime", "Owners", "AppRoleAssignmentRequired", "AccountEnabled",
-    "PasswordCredentials", "KeyCredentials", "VerifiedPublisher"
-)
+# NOTE: we intentionally do NOT pass -Property/$select on the service principal calls.
+# Microsoft Graph suppresses createdDateTime for foreign/external service principals
+# (apps homed in another tenant, e.g. Microsoft first-party multi-tenant apps) when the
+# property is requested via $select: it comes back empty. Under the default projection
+# Graph returns it (the SDK surfaces it via AdditionalProperties, read by
+# Get-CreatedDateTimeSafe). The default projection already includes every property this
+# report uses (credentials, app roles, oauth2 scopes, verified publisher, tags, etc.),
+# so dropping $select fixes the date with no extra Graph calls and no lost data.
 
 if ($TargetAppId) {
     # Targeted single-app scan — skip full tenant enumeration for a fast, quick lookup.
     # Accepts either the Application (client) ID or the Service Principal object ID.
     Write-Host "Targeted scan requested for '$TargetAppId' — skipping full tenant enumeration" -ForegroundColor Cyan
-    $servicePrincipals = @(Get-MgServicePrincipal -Filter "appId eq '$TargetAppId'" -Property $servicePrincipalProperties -ErrorAction SilentlyContinue)
+    $servicePrincipals = @(Get-MgServicePrincipal -Filter "appId eq '$TargetAppId'" -ErrorAction SilentlyContinue)
     if ($servicePrincipals.Count -eq 0) {
-        $targetSp = Get-MgServicePrincipal -ServicePrincipalId $TargetAppId -Property $servicePrincipalProperties -ErrorAction SilentlyContinue
+        $targetSp = Get-MgServicePrincipal -ServicePrincipalId $TargetAppId -ErrorAction SilentlyContinue
         if ($targetSp) { $servicePrincipals = @($targetSp) }
     }
     if ($servicePrincipals.Count -eq 0) {
@@ -1018,7 +1071,7 @@ if ($TargetAppId) {
     }
 } else {
     # Get service principals that match the Entra ID portal "Enterprise Applications" filter
-    $servicePrincipals = Invoke-MgWithRetry { Get-MgServicePrincipal -All -Property $servicePrincipalProperties } | Where-Object {
+    $servicePrincipals = Invoke-MgWithRetry { Get-MgServicePrincipal -All } | Where-Object {
         $_.ServicePrincipalType -eq "Application" -and
         #$_.AppOwnerOrganizationId -ne "f8cdef31-a31e-4b4a-93e4-5f571e91255a" -and
         $_.AppId -notin @(
@@ -1050,7 +1103,7 @@ if (-not $TargetAppId) {
     try {
         Write-Host "Pre-fetching App Registrations, OAuth2 grants and role assignments (bulk)..." -ForegroundColor Green
 
-        Invoke-MgWithRetry { Get-MgApplication -All -Property 'Id,AppId,PasswordCredentials,KeyCredentials' } |
+        Invoke-MgWithRetry { Get-MgApplication -All -Property 'Id,AppId,PasswordCredentials,KeyCredentials,CreatedDateTime' } |
             ForEach-Object { $script:appRegistrationCache[$_.AppId] = $_ }
         $script:appRegistrationCacheComplete = $true
 
@@ -1256,7 +1309,27 @@ foreach ($sp in $servicePrincipals) {
     } else {
         Get-ApplicationCredentials -AppId $sp.AppId -ServicePrincipal $sp
     }
-    
+
+    # Resolve the effective creation date. The App Registration's CreatedDateTime is the true
+    # creation timestamp when an App Registration exists; the Service Principal's own
+    # CreatedDateTime can reflect first-consent time instead. Reuses the App Registration cache
+    # (a lookup only, no additional Graph call) and falls back to the Service Principal date for
+    # pure service principals (e.g. multi-tenant third-party apps with no local App Registration).
+    $appReg = Get-AppRegistrationCached -AppId $sp.AppId
+    $appRegCreatedDate = if ($appReg) { Get-CreatedDateTimeSafe -GraphObject $appReg } else { $null }
+    $effectiveCreatedDate = if ($appRegCreatedDate) { $appRegCreatedDate } else { Get-CreatedDateTimeSafe -GraphObject $sp }
+
+    # Classify the effective creation date into an age bucket used by the Created column filter.
+    # Apps with no known creation date stay $null and are excluded whenever a Created filter is active.
+    $createdBucket = $null
+    if ($effectiveCreatedDate) {
+        $daysSinceCreated = ((Get-Date) - $effectiveCreatedDate).Days
+        $createdBucket =
+            if ($daysSinceCreated -le 30)  { 'new' }
+            elseif ($daysSinceCreated -le 365) { 'lastyear' }
+            else { 'over1y' }
+    }
+
     # Calculate total users affected
     $totalUsersAffected = if ($permissionInfo.DelegatedGrants | Where-Object { $_.ConsentType -eq "AllPrincipals" }) { 
         "All Users" 
@@ -1315,7 +1388,10 @@ foreach ($sp in $servicePrincipals) {
         AppId = $sp.AppId
         ServicePrincipalId = $sp.Id
         AppOwnerOrganizationId = $sp.AppOwnerOrganizationId
-        CreatedDate = $sp.CreatedDateTime
+        CreatedDate = Get-CreatedDateTimeSafe -GraphObject $sp
+        AppRegistrationCreatedDate = $appRegCreatedDate
+        EffectiveCreatedDate = $effectiveCreatedDate
+        CreatedBucket = $createdBucket
         AppType = $appType
         
         # App Registration info
@@ -2070,8 +2146,14 @@ $html = @"
             <span class="filter-tag c-gray"  data-group="enabled" data-value="no"  onclick="toggleTag(this)">Disabled <span class="cnt"></span></span>
         </div>
         <div class="filter-group">
+            <span class="filter-group-label">Created</span>
+            <span class="filter-tag c-orange" data-group="created" data-value="new"      onclick="toggleTag(this)">New App <span class="cnt"></span></span>
+            <span class="filter-tag c-blue"   data-group="created" data-value="lastyear" onclick="toggleTag(this)">Last Year <span class="cnt"></span></span>
+            <span class="filter-tag c-gray"   data-group="created" data-value="over1y"   onclick="toggleTag(this)">+1 Year <span class="cnt"></span></span>
+        </div>
+        <div class="filter-group">
             <span class="filter-group-label">App Type</span>
-            <span class="filter-tag c-gray"  data-group="apptype" data-value="enterprise" onclick="toggleTag(this)">Enterprise Application <span class="cnt"></span></span>
+            <span class="filter-tag c-gray"  data-group="apptype" data-value="enterprise" onclick="toggleTag(this)">Enterprise App <span class="cnt"></span></span>
             <span class="filter-tag c-green" data-group="apptype" data-value="appproxy"   onclick="toggleTag(this)">App Proxy <span class="cnt"></span></span>
             <span class="filter-tag c-blue"  data-group="apptype" data-value="blueprint"  onclick="toggleTag(this)">Agent Blueprint <span class="cnt"></span></span>
         </div>
@@ -2143,16 +2225,17 @@ $html = @"
         <thead>
             <tr>
                 <th onclick="sortTable('reportTable', 0, 'string')">Application Name</th>
-                <th onclick="sortTable('reportTable', 1, 'string')">Enabled</th>
-                <th onclick="sortTable('reportTable', 2, 'string')">App ID</th>
-                <th onclick="sortTable('reportTable', 3, 'string')">App Type</th>
-                <th onclick="sortTable('reportTable', 4, 'string')">App Ownership</th>
-                <th onclick="sortTable('reportTable', 5, 'string')">Has App Registration</th>
-                <th onclick="sortTable('reportTable', 6, 'string')">Assignment Required</th>
-                <th onclick="sortTable('reportTable', 7, 'string')">Owners</th>
-                <th onclick="sortTable('reportTable', 8, 'string')">Risk Level</th>
+                <th onclick="sortTable('reportTable', 1, 'string')">Created</th>
+                <th onclick="sortTable('reportTable', 2, 'string')">Enabled</th>
+                <th onclick="sortTable('reportTable', 3, 'string')">App ID</th>
+                <th onclick="sortTable('reportTable', 4, 'string')">App Type</th>
+                <th onclick="sortTable('reportTable', 5, 'string')">App Ownership</th>
+                <th onclick="sortTable('reportTable', 6, 'string')">Has App Registration</th>
+                <th onclick="sortTable('reportTable', 7, 'string')">Assignment Required</th>
+                <th onclick="sortTable('reportTable', 8, 'string')">Owners</th>
+                <th onclick="sortTable('reportTable', 9, 'string')">Risk Level</th>
                 <th>Permissions</th>
-                <th onclick="sortTable('reportTable', 10, 'string')">Credentials</th>
+                <th onclick="sortTable('reportTable', 11, 'string')">Credentials</th>
             </tr>
         </thead>
         <tbody>
@@ -2185,7 +2268,7 @@ foreach ($app in $sortedReport) {
     $appTypeText = switch ($app.AppType) {
         'appproxy'  { "<span class='badge green clickable-badge' data-fg='apptype' data-fv='appproxy' title='On-premises application published via Microsoft Entra Application Proxy for secure remote access without a VPN.'>App Proxy</span>" }
         'blueprint' { "<span class='badge blue clickable-badge' data-fg='apptype' data-fv='blueprint' title='Template defining an AI agent identity configuration. Can be instantiated into multiple agent identities that inherit its permissions.'>Agent Blueprint</span>" }
-        default     { "<span class='badge gray clickable-badge' data-fg='apptype' data-fv='enterprise' title='Standard registered application instance in this tenant, created via app registration or consent.'>Enterprise Application</span>" }
+        default     { "<span class='badge gray clickable-badge' data-fg='apptype' data-fv='enterprise' title='Standard registered application instance in this tenant, created via app registration or consent.'>Enterprise App</span>" }
     }
 
     # Determine app ownership
@@ -2281,7 +2364,13 @@ foreach ($app in $sortedReport) {
     $hasSecretsValue = if ($app.ActiveSecrets -gt 0) { "yes" } else { "no" }
     $expiringValue = if ($app.ExpiringCredentials -gt 0) { "yes" } else { "no" }
     $expiredValue  = if ($app.ExpiredCredentials -gt 0) { "yes" } else { "no" }
-    
+
+    # Created column: show the effective creation date (App Registration preferred, Service
+    # Principal as fallback) and flag apps created within the last 30 days with a New App badge.
+    $safeCreatedDate = if ($app.EffectiveCreatedDate) { $app.EffectiveCreatedDate.ToString('yyyy-MM-dd') } else { '&#8212;' }
+    $createdSourceLabel = if ($app.AppRegistrationCreatedDate) { 'App Registration' } else { 'Service Principal (first consent)' }
+    $newAppBadge = if ($app.CreatedBucket -eq 'new') { "<span class='badge orange clickable-badge csv-exclude' data-fg='created' data-fv='new' style='margin-right:6px' title='Created within the last 30 days.'>New App</span>" } else { '' }
+
     # Build scoped permission HTML — one accumulator per type (single pass)
     $appPermItems       = ""
     $delegatedPermItems = ""
@@ -2692,8 +2781,9 @@ foreach ($app in $sortedReport) {
     }
     $modalDataEntries.Add("`"$safeKey`": { appPermsTitle: $(ConvertTo-Json $appPermsModalTitle -Compress), appPermsHtml: $(ConvertTo-Json $appPermItems -Compress), delegatedPermsTitle: $(ConvertTo-Json $delegatedPermsModalTitle -Compress), delegatedPermsHtml: $(ConvertTo-Json $delegatedPermItems -Compress), rolePermsTitle: $(ConvertTo-Json $rolePermsModalTitle -Compress), rolePermsHtml: $(ConvertTo-Json $rolePermItems -Compress), riskTitle: $(ConvertTo-Json $riskModalTitle -Compress), riskHtml: $(ConvertTo-Json $riskFactorsHtml -Compress), certsTitle: $(ConvertTo-Json $certsModalTitle -Compress), certsHtml: $(ConvertTo-Json $certsModalHtml -Compress), secretsTitle: $(ConvertTo-Json $secretsModalTitle -Compress), secretsHtml: $(ConvertTo-Json $secretsModalHtml -Compress), ficTitle: $(ConvertTo-Json $ficModalTitle -Compress), ficHtml: $(ConvertTo-Json $ficModalHtml -Compress), expiringTitle: $(ConvertTo-Json $expiringModalTitle -Compress), expiringHtml: $(ConvertTo-Json $expiringModalHtml -Compress), expiredTitle: $(ConvertTo-Json $expiredModalTitle -Compress), expiredHtml: $(ConvertTo-Json $expiredModalHtml -Compress), ownershipTitle: $(ConvertTo-Json $ownershipModalTitle -Compress), ownershipHtml: $(ConvertTo-Json $ownershipModalHtml -Compress), appProxyPreAuthTitle: $(ConvertTo-Json $appProxyPreAuthTitle -Compress), appProxyPreAuthHtml: $(ConvertTo-Json $appProxyPreAuthHtml -Compress), ownersTitle: $(ConvertTo-Json $ownersModalTitle -Compress), ownersHtml: $(ConvertTo-Json $ownersModalHtml -Compress), ownershipGapTitle: $(ConvertTo-Json $ownershipGapModalTitle -Compress), ownershipGapHtml: $(ConvertTo-Json $ownershipGapModalHtml -Compress) }")
     $html += @"
-            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$safeAppId" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hasspcreds="$(if ($app.HasServicePrincipalCredentials) { 'yes' } else { 'no' })" data-hasadminconsent="$(if ($hasAdminConsentDelegated) { 'yes' } else { 'no' })" data-hasuserconsent="$(if ($hasUserConsentDelegated) { 'yes' } else { 'no' })" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-hasfederated="$(if ($app.FederatedCredentials -gt 0) { 'yes' } else { 'no' })" data-expiring="$expiringValue" data-expired="$expiredValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-apptype="$($app.AppType)" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })">
-                <td><a class="app-name" href="$portalUrl" target="_blank" title="Open in Entra portal">$safeDisplayName</a></td>
+            <tr class="$riskClass" data-name="$safeDisplayName" data-appid="$safeAppId" data-ownertext="$safeOwnerSearchText" data-permtext="$safePermissionSearchText" data-risk="$($app.RiskLevel)" data-appreg="$(if ($app.HasAppRegistration) { 'yes' } else { 'no' })" data-apppermcount="$($app.ApplicationPermissions)" data-delegatedpermcount="$($app.DelegatedPermissions)" data-rolecount="$($app.DirectoryRoles)" data-hasspcreds="$(if ($app.HasServicePrincipalCredentials) { 'yes' } else { 'no' })" data-hasadminconsent="$(if ($hasAdminConsentDelegated) { 'yes' } else { 'no' })" data-hasuserconsent="$(if ($hasUserConsentDelegated) { 'yes' } else { 'no' })" data-hascerts="$hasCertsValue" data-hassecrets="$hasSecretsValue" data-hasfederated="$(if ($app.FederatedCredentials -gt 0) { 'yes' } else { 'no' })" data-expiring="$expiringValue" data-expired="$expiredValue" data-owners="$(if ($app.HasOwners) { 'yes' } else { 'no' })" data-ownershipgap="$(if ($app.OwnershipGap) { 'yes' } else { 'no' })" data-ownership="$ownershipType" data-apptype="$($app.AppType)" data-verifiedpublisher="$verifiedPublisherValue" data-assignment="$(if ($app.AssignmentRequired) { 'required' } else { 'not-required' })" data-enabled="$(if ($app.IsEnabled) { 'yes' } else { 'no' })" data-createdbucket="$(if ($app.CreatedBucket) { $app.CreatedBucket } else { '' })">
+                <td>$newAppBadge<a class="app-name" href="$portalUrl" target="_blank" title="Open in Entra portal">$safeDisplayName</a></td>
+                <td class="cell-sm" title="Source: $createdSourceLabel">$safeCreatedDate</td>
                 <td class="$enabledClass">$enabledText</td>
                 <td><code class="mono">$safeAppId</code></td>
                 <td class="$appTypeClass">$appTypeText</td>
@@ -2725,11 +2815,11 @@ $html += @"
         const activeFilters = {};
         const groupLabels = {
             ownership: 'Ownership', risk: 'Risk', appreg: 'App Reg', apptype: 'App Type',
-            assignment: 'Assignment', owners: 'Owners', permissions: 'Permissions', consent: 'Consent', credentials: 'Credentials', enabled: 'Enabled', publisher: 'Publisher'
+            assignment: 'Assignment', owners: 'Owners', permissions: 'Permissions', consent: 'Consent', credentials: 'Credentials', enabled: 'Enabled', publisher: 'Publisher', created: 'Created'
         };
         const valueLabels = {
             internal: 'Internal', external: 'External', microsoft: 'Microsoft', 'third-party': 'Third-Party',
-            enterprise: 'Enterprise Application', appproxy: 'App Proxy', blueprint: 'Agent Blueprint',
+            enterprise: 'Enterprise App', appproxy: 'App Proxy', blueprint: 'Agent Blueprint',
             Critical: 'Critical', High: 'High', Medium: 'Medium', Low: 'Low',
             yes: 'Yes', no: 'No',
             required: 'Required', 'not-required': 'Open Access',
@@ -2737,7 +2827,8 @@ $html += @"
             application: 'Application', delegated: 'Delegated', roles: 'Roles', 'sp-creds': 'Has SP Credentials', none: 'None',
             certs: 'Has Certs', secrets: 'Has Secrets', federated: 'Has Federated', expiring: 'Expiring', expired: 'Expired',
             verified: 'Verified', unverified: 'Unverified',
-            admin: 'Admin Consent', user: 'User Consent'
+            admin: 'Admin Consent', user: 'User Consent',
+            new: 'New App', lastyear: 'Last Year', over1y: '+1 Year'
         };
 
         function rowMatchesTag(row, group, value) {
@@ -2765,6 +2856,7 @@ $html += @"
                     if (value === 'expired')   return row.dataset.expired  === 'yes';
                     return false;
                 case 'enabled':     return row.dataset.enabled === value;
+                case 'created':     return row.dataset.createdbucket === value;
                 case 'permissions': {
                     const a = parseInt(row.dataset.apppermcount) || 0;
                     const d = parseInt(row.dataset.delegatedpermcount) || 0;

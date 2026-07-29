@@ -24,6 +24,7 @@ The script connects to Microsoft Graph, retrieves every Enterprise Application r
 - **High-value target apps**: flags well-known first-party admin/automation apps (Azure CLI, Azure/Azure AD PowerShell, Exchange Online PowerShell, Microsoft Graph CLI/PowerShell) that are open to all users
 - **Risk scoring**: a weighted score per app based on the above signals, producing a Critical / High / Medium / Low classification; see [Risk scoring](#risk-scoring)
 - **Governance signals**: whether assignment is required, whether the app is enabled or disabled, whether it is internal, Microsoft-owned, or third-party
+- **Creation date**: the effective creation date of each app, preferring the App Registration's timestamp and falling back to the Service Principal's, surfaced as a sortable Created column and bucketed by age (New App, Last Year, +1 Year) for filtering. Apps created in the last 30 days are flagged with a New App badge next to the application name
 
 The output is a single `.html` file that works offline with no external dependencies and no server required.
 
@@ -63,7 +64,7 @@ None of this changes the underlying `Points` value of any risk factor; only the 
 | App Type | Classifies each row as Enterprise Application, App Proxy, or Agent Blueprint. Independent from App Ownership: a blueprint or App Proxy app can be internal, Microsoft, or third-party. |
 | Summary cards | Clickable cards for total apps, risk levels, ownership type, unverified publishers, expiring credentials, ownership gaps, and disabled apps, each filtering the table |
 | Search | Debounced real-time text search across application name, App ID, owner, and permission |
-| Filter panel | Multi-dimensional filter tags for enabled state, App Type, ownership, publisher verification, App Registration, assignment, owners, risk, permissions, consent type, and credentials |
+| Filter panel | Multi-dimensional filter tags for enabled state, creation date bucket, App Type, ownership, publisher verification, App Registration, assignment, owners, risk, permissions, consent type, and credentials |
 | Column sort | Click any sortable column header to sort ascending; click again to reverse |
 | Export CSV | Downloads the currently visible (filtered) rows as a `.csv` file, UTF-8 with BOM for correct Excel rendering |
 | Dark / light mode | Toggle persisted to `localStorage`; a GitHub repo link icon sits next to the toggle in the header |
@@ -97,6 +98,8 @@ Most badges in the report table are clickable and open a detail modal with addit
 | Owners | N owner(s) | Sortable table of all owners with their coverage (Enterprise App, App Registration, or both). Wording differs for Agent Blueprints; see [Agent Blueprint-specific behavior](#agent-blueprint-specific-behavior) |
 | Owners | Ownership Gap | Owners that are not assigned to both the Service Principal and the App Registration |
 | Owners | No owners | Plain badge, no modal |
+| Application Name | New App | Plain badge, no modal, shown to the left of the app name for apps created within the last 30 days. Uses the App Registration creation date when one exists and falls back to the Service Principal creation date otherwise. Clicking it filters the table to the New App bucket, the same as the "New App" tag in the filter panel's Created group |
+| Created | (date) | Column sits directly after Application Name. Shows the effective creation date as `yyyy-MM-dd`, with a tooltip naming which source the date came from. Filterable via the filter panel's Created group, which buckets apps by age: New App (0 to 30 days), Last Year (31 to 365 days), and +1 Year (older than 365 days). Apps with no known creation date are excluded whenever a Created filter is active |
 
 ## Prerequisites
 
