@@ -2,7 +2,13 @@
 
 Generates an interactive, self-contained HTML security report for every Enterprise Application (Service Principal) in a Microsoft Entra ID tenant, including standard Enterprise Applications, on-premises apps published via Application Proxy, and Microsoft Entra Agent ID blueprint principals. Designed for security reviews, governance audits, and weekly automated reporting via Azure DevOps.
 
-![Entra ID App Report example screenshot](EntraIDAppReport_Example.png)
+## Live demo
+
+Try the report in your browser with fictional sample data (filters, sorting, detail modals and dark mode all work):
+
+[![Entra ID App Report preview](docs/images/report-preview.png)](https://matejklemencic.github.io/EntraID-AppReport/demo/)
+
+**[▶ Open the live demo](https://matejklemencic.github.io/EntraID-AppReport/demo/)**
 
 ## Acknowledgments
 
@@ -424,6 +430,8 @@ Download the artifact from the pipeline run, open the HTML file in any browser. 
 |------|---------|
 | `Get-EntraIDAppReport.ps1` | Main script |
 | `azure-pipelines.yml` | Azure DevOps pipeline definition |
+| `docs/demo/index.html` | Sample report with fictional data, published as the live demo through GitHub Pages |
+| `docs/images/report-preview.png` | Screenshot used in the live demo section |
 
 ## Author
 

@@ -1,3 +1,6 @@
 # Generated reports
 *.html
 *.csv
+
+# Sample report published through GitHub Pages
+!docs/demo/index.html
