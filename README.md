@@ -155,7 +155,7 @@ For **interactive (user) runs**, these are requested as delegated scopes during 
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `-OutputPath` | String | Auto-generated | Path for the HTML report. Defaults to `EntraIDAppReport__{TenantName}_{Date}.html` in the current directory. |
+| `-OutputPath` | String | Auto-generated | Path for the HTML report. Defaults to `EntraIDEntraReport_{TenantName}_{Date}.html` in the current directory. |
 | `-TenantId` | String | None | Entra ID tenant ID. Required for Service Principal authentication. Used when targeting a specific tenant, e.g. running once per customer tenant in a GDAP/multi-tenant scenario. |
 | `-AccessToken` | SecureString | None | Pre-acquired Microsoft Graph token. Used in Azure DevOps pipelines via `Get-AzAccessToken`. |
 | `-ClientId` | String | None | App (client) ID for Service Principal authentication. Must be combined with `-CertificateThumbprint` and `-TenantId`, or with `-UseManagedIdentity` to select a user-assigned Managed Identity. Supplying it with neither is a validation error. |

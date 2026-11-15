@@ -19,7 +19,7 @@
 .OUTPUTS
     None. Writes an HTML report to the file specified by -OutputPath.
 .PARAMETER OutputPath
-    Path to save the generated HTML report. Defaults to "EntraIDAppReport__{TenantName}_{Date}.html".
+    Path to save the generated HTML report. Defaults to "EntraIDEntraReport_{TenantName}_{Date}.html".
 .PARAMETER TenantId
     Optional. The Entra ID tenant ID to connect to. Required when using Service Principal authentication.
 .PARAMETER AccessToken
@@ -1502,7 +1502,7 @@ $tenantId = $tenantInfo.Id
 
 if (-not $OutputPath) {
     $safeName = $tenantName -replace '[^\w]', '_'
-    $OutputPath = "EntraIDAppReport__${safeName}_$(Get-Date -Format 'yyyy-MM-dd').html"
+    $OutputPath = "EntraIDEntraReport_${safeName}_$(Get-Date -Format 'yyyy-MM-dd').html"
 }
 
 # Resolve a relative output path against the current PowerShell location.
