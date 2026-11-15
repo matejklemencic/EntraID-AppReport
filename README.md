@@ -76,7 +76,7 @@ None of this changes the underlying `Points` value of any risk factor; only the 
 | Dark / light mode | Toggle persisted to `localStorage`; a GitHub repo link icon sits next to the toggle in the header |
 | Portal deep links | Application name links directly to the Entra portal entry for that app |
 | Detail modals | Clickable badges throughout the report open a detail panel with full information; see [Interactive badges](#interactive-badges) |
-| Risk score visual scale | The Risk Analysis modal shows a segmented threshold bar (Low/Medium/High/Critical) with a marker at the app's actual score; disabled apps show a muted grey badge/gauge and a status banner instead of full color, since the score reflects inherent (not currently exploitable) risk |
+| Risk score visual scale | The Risk Analysis modal shows a segmented threshold bar (Low/Medium/High/Critical) with a marker at the app's actual score; disabled apps show a muted grey score banner and gauge plus a status banner instead of full color, since the score reflects inherent (not currently exploitable) risk |
 
 ## Demo
 
@@ -84,7 +84,7 @@ None of this changes the underlying `Points` value of any risk factor; only the 
 
 ## Interactive badges
 
-Most badges in the report table are clickable and open a detail modal with additional information. Badges that only act as filters (Enabled, App Registration, Assignment Required Yes/No, App Type) are not modal triggers themselves, though the Assignment Required column can carry additional clickable sub-badges (Partial Mitigation, Verify Pre-Auth) that do open modals. Modal tables (Certificates, Secrets, Federated, Expiring, Expired, and Owners) are sortable; click any column header to sort ascending, click again to reverse.
+Most badges in the report table are clickable and open a detail modal with additional information. Every modal shows the section as a small label, the app name as the title and the App ID underneath. Badges that only act as filters (Enabled, App Registration, Assignment Required Yes/No, App Type) are not modal triggers themselves, though the Assignment Required column can carry additional clickable sub-badges (Partial Mitigation, Verify Pre-Auth) that do open modals. All modal tables (Certificates, Secrets, Federated, Expiring, Expired, Owners, Ownership Gap, App Ownership and Pre-Authentication) are sortable; click any column header to sort ascending, click again to reverse.
 
 | Column | Badge | Modal content |
 |--------|-------|---------------|
@@ -95,7 +95,7 @@ Most badges in the report table are clickable and open a detail modal with addit
 | Permissions | App: N | Full list of application permissions with resource; each permission links to the Graph Permissions Explorer |
 | Permissions | Delegated: N | Full list of delegated permissions with resource; each permission links to the Graph Permissions Explorer. Each entry also shows a consent badge, **Admin Consent** (tenant-wide) or **N user(s) consented** (self-service), that filters the table by consent type when clicked |
 | Permissions | Roles: N | Full list of directory roles assigned to the service principal; each role links to the Microsoft Learn built-in roles reference |
-| Risk | Critical / High / Medium / Low | A score header (large point total plus the risk-level badge) followed by every contributing signal, sorted highest-to-lowest with individual point values, and a visual threshold scale bar showing where the score falls between Low/Medium/High/Critical; permission factors link to the Graph Permissions Explorer, directory-role factors link to Microsoft Learn, several factors link to the relevant Microsoft Learn article, and some factors carry a hover tooltip (rendered as a small info icon) with extra guidance. For disabled apps, the badge and gauge are shown in muted grey with a banner explaining the score reflects inherent risk only |
+| Risk | Critical / High / Medium / Low | A banner with the score and level (`Risk score: N · Level`, red for Critical and High, amber for Medium, green for Low) followed by every contributing signal, sorted highest-to-lowest with individual point values, and a visual threshold scale bar showing where the score falls between Low/Medium/High/Critical; permission factors link to the Graph Permissions Explorer, directory-role factors link to Microsoft Learn, several factors link to the relevant Microsoft Learn article, and some factors carry a hover tooltip (rendered as a small info icon) with extra guidance. For disabled apps, the banner and gauge are shown in muted grey with a second banner explaining the score reflects inherent risk only |
 | Credentials | Certs: N | Sortable table of each active certificate: display name, valid from, expiry date (highlighted if expiring/expired), and Key ID |
 | Credentials | Secrets: N | Sortable table of each active client secret: display name, created date, expiry date (highlighted if expiring/expired), and Key ID. App Proxy apps get an inline hint icon next to any secret literally named `CWAP_AuthSecret`; see [App Proxy-specific behavior](#app-proxy-specific-behavior) |
 | Credentials | Federated: N | Sortable table of each Federated Identity Credential: name, issuer, and subject. FIC has no expiry, so it never appears in the Expiring/Expired tables; this is its own dedicated modal. Filterable via the filter panel's "Has Federated" tag in the Credentials group |
@@ -301,7 +301,7 @@ The list is defined in the script as `$script:HighValueTargetApps` and can be ex
 
 ### Disabled app handling
 
-Disabled apps (`AccountEnabled = false`) keep their full inherent risk score. A disabled app can be re-enabled with a single admin toggle, so an over-privileged dormant app is still a real risk. No factor is added to the list for this; instead, the Risk Analysis modal shows a status banner explaining the app is currently disabled and that the score reflects inherent risk if re-enabled, and mutes the risk badge/gauge color to grey. The main table row, its Risk Level badge, and the **Enabled** column / filter are unaffected and still indicate current exploitability.
+Disabled apps (`AccountEnabled = false`) keep their full inherent risk score. A disabled app can be re-enabled with a single admin toggle, so an over-privileged dormant app is still a real risk. No factor is added to the list for this; instead, the Risk Analysis modal shows a status banner explaining the app is currently disabled and that the score reflects inherent risk if re-enabled, and mutes the risk banner/gauge color to grey. The main table row, its Risk Level badge, and the **Enabled** column / filter are unaffected and still indicate current exploitability.
 
 ## Custom risk configuration
 

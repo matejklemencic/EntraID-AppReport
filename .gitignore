@@ -4,3 +4,6 @@
 
 # Sample report published through GitHub Pages
 !docs/demo/index.html
+
+# Demo generator (local only)
+tools/
